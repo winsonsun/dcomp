@@ -1,0 +1,9 @@
+test_root
+tests
+*.json
+*.log
+.DS_Store
+.vscode
+*.pyc
+full_dump.txt
+.env
