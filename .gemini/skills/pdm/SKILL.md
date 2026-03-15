@@ -23,34 +23,110 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
 
 You may compose matrices using any combination of the following facets. **Facet 1 is mandatory** for all matrices.
 
-### Facet 1: The Pipeline & Workflow View (Mandatory Base)
-Describes the core data pipeline (`what the software is doing`) overlaid with the Manager Layer (`what the human is doing`).
+### Facet 1: The Workflow View (The "Who & When")
 
-**The Application Operations (ITVDE + Safety):**
-*   `[I]` **Ingest:** Read external state or persisted cache into memory.
-*   `[T]` **Transform:** Modify shape/structure of data. Apply business logic.
-*   `[V]` **Validate:** Check integrity, compute diffs, enforce rules.
-*   `[D]` **Distribute:** Route data to disk caches, network, or stdout.
-*   `[E]` **Execute:** Mutate the physical external world (e.g., disk I/O, API calls).
-*   `[B]` **Backup:** Preserving state before a destructive mutation (Composed `[I]` + `[D]`).
+*   **Answers:** Who is interacting with the data, and when does it happen?
+*   **Focus:** Human-in-the-loop interactions, business processes, and manual system gates.
+*   **Use Case:** Designing User Experience (UX), writing user manuals, tracking manual interventions, and auditing safety gates.
 
-**The Manager Layer Modifiers (Super-Headers):**
-Apply these to column headers to represent Human-in-the-Loop workflows:
-*   `[W-Cfg]` **Configure:** Human defines parameters shaping the pipeline.
-*   `[W-Rev]` **Review:** Pipeline halts for human auditing (read-only).
-*   `[W-App]` **Approve:** Human pulls the trigger on high-risk execution.
-*   `[W-Bak]` **Checkpoint:** Human triggers/verifies a safety net.
+**DSL Elements (Modifiers & Super-Headers):**
+These are typically applied to the column headers (the application phases) to denote what role a human manager plays during that phase.
+*   `[W-Cfg]` **Configure:** The human defines parameters or provides input to shape the upcoming pipeline. (e.g., The user manually editing `jobs.json` before running a scan).
+*   `[W-Rev]` **Review:** The pipeline halts and surfaces data for human auditing. No state mutations occur during this step. (e.g., The user reading a `diff` output report in the terminal).
+*   `[W-App]` **Approve / Actuate:** The human explicitly pulls the trigger on a destructive or high-risk execution step. (e.g., The user typing `yes` or running `sync execute`).
+*   `[W-Bak]` **Checkpoint:** The human explicitly triggers or verifies a safety net before proceeding, securing a known-good state. (e.g., The user manually copying `cache.json` to a backup folder before a major system pruning).
 
-### Facet 2: The State Transition View (Lineage & Immutability)
-Use this facet when the user asks about functional purity, data lineage, or state changes.
-*   **Versioning:** Split rows to represent immutable states (e.g., `Entity (v1)`, `Entity (v2)`).
-*   **Direction:** Append `(src)` or `(dst)` to cell operations to show the flow of functional inputs and outputs.
-*   **Functional Operators:** Use `[Y] Yield`, `[R] Reduce`, `[F] Filter` in place of `[T] Transform` to be mathematically precise about the mutation.
+### Facet 2: The Pipeline View (The "What")
 
-### Facet 3: The Formal Constraint View (Alloy Extension)
-Use this facet when the user asks about formal verification, relational multiplicity, or test prerequisites.
-*   **Multiplicity:** Append cardinality to operations: `[1]` (exactly one), `[?]` (zero or one), `[*]` (zero or more), `[+]` (one or more). Example: `[D] [1]`
-*   **Constraints:** Add a `Constraint:` row to the bottom of the matrix. Provide a mathematical or logical assertion that must be true for that column's phase (e.g., `v2 ⊆ v1` or `Records > 0`).
+*   **Answers:** What is the software doing to the data?
+*   **Focus:** The internal machinery of the application, how data flows between memory and storage.
+*   **Use Case:** Architecting the core application logic, defining the boundaries of microservices or internal functions, and isolating disk I/O from computation.
+
+**DSL Elements (The ITVDE Operations):**
+These are the foundational operations placed inside the matrix cells to represent the application's action upon a data entity during a specific phase.
+
+*   `[I]` **Ingest:** Reading external state or a persisted cache into the application's working memory. (e.g., Parsing `cache.json` into a dictionary).
+*   `[T]` **Transform:** Modifying the shape, structure, or semantic value of data using internal business logic. (e.g., Parsing a raw path `/Volumes/A` and converting it to `PATH01`).
+*   `[V]` **Validate:** Checking data integrity, computing mathematical diffs between states, or enforcing business rules before proceeding. (e.g., Comparing `dir1` and `dir2` hashes).
+*   `[D]` **Distribute:** Routing internal data back out to persistent disk caches, network boundaries, or standard output. (e.g., Calling `atomic_write_json(master_cache)`).
+*   `[E]` **Execute:** The "Danger Zone". Mutating the physical external world based on logical decisions. (e.g., Calling `os.remove(file.mp4)` or executing network API commands).
+*   `[B]` **Backup:** A composed safety operation (`[I] Ingest` + `[D] Distribute`) where the software preserves the current state of an entity before a destructive mutation occurs. (e.g., The system creating `cache.json.bak` automatically before pruning).
+
+### Facet 3: The State Transition View (The "Which Version")
+
+*   **Answers:** Is this data mutating in-place, or yielding a new immutable copy? Which exact version of a data entity is being read during a specific phase?
+*   **Focus:** Strict data lineage, pure functions, and tracking historical state transitions.
+*   **Use Case:** Debugging state-related bugs, designing functional or event-sourced architectures, tracking data lineage for auditing.
+
+**DSL Elements (Entity Versioning & Directional Dependency):**
+These elements replace or modify the standard rows and cell operations to explicitly track how a single entity evolves over time without destructive overwriting.
+
+*   **Versioning (Row Splitting):** Split a single entity row into multiple rows to represent distinct, immutable versions of that data structure as it progresses through the pipeline.
+    *   *Example:* Instead of a single `Raw Catalog` row, use `Raw Catalog (v1 - Persisted)` and `Raw Catalog (v2 - Pruned)`.
+*   **Directional Dependency:** Append modifiers to the operations within cells to clearly indicate if the entity is acting as a source or destination for that operation.
+    *   `(`**`src`**`)`: The immutable source data read by an operation.
+    *   `(`**`dst`**`)`: The newly generated immutable destination resulting from an operation.
+*   **Functional Operators (YRF):** These replace the generic `[T] Transform` to be mathematically precise about the mutation.
+    *   `[Y]` **Yield:** Explicitly denotes generating a brand new, immutable data structure derived from prior inputs.
+    *   `[R]` **Reduce:** Aggregating, folding, or summarizing a dataset into a smaller, synthesized form (e.g., tallying total bytes).
+    *   `[F]` **Filter:** Processing an existing dataset into a smaller, immutable subset by removing items that do not meet a predicate (e.g., pruning missing files).
+
+
+### Facet 4: The Relational & Constraint View (The "Proof")
+
+*   **Answers:** What mathematical rules govern the existence or cardinality of this data? What logical facts must be true for a phase to be considered complete and safe?
+*   **Focus:** Formal verification, invariants, relational logic, and test-driven development (TDD) prerequisites.
+*   **Use Case:** Designing database schemas, defining constraints for multi-node operations, validating unit/integration tests mathematically.
+
+**DSL Elements (Multiplicity & State Constraints):**
+Inspired by structural modeling languages like Alloy, this facet bounds the state transitions defined in Petal 2 and Petal 3 with mathematical proofs.
+
+*   **Relational Multiplicity (Cell Cardinality Modifiers):** Appended directly to operations, these define *how many* instances of a data entity are involved in a specific phase.
+    *   `[1]` **Exactly one:** Represents a singular, definitive entity. (e.g., `[D] [1]` - Writes exactly one master `cache.json` file).
+    *   `[?]` **Zero or one:** An optional entity that may not be produced. (e.g., `[Y] [?]` - A Diff phase may or may not yield a manifest depending on whether any changes were found).
+    *   `[*]` **Zero or more:** Represents unbounded ingestion or processing. (e.g., `[I] [*]` - Ingests many remote cache shards during a massive sync).
+    *   `[+]` **One or more:** Represents a guaranteed minimum batch of entities. (e.g., `[E] [+]` - A guaranteed batch deletion of multiple dead paths).
+
+*   **State Constraints (Invariant Assertions):** Defines the mathematical or logical invariants that must hold true for a specific column's phase to be considered valid and structurally sound.
+    *   **Implementation:** Add a `Constraint:` row to the absolute bottom of the matrix. Provide assertions using standard relational logic symbols (`⊆` subset, `==` equality, `>` greater than).
+    *   *Example Assertions:* 
+        *   `v2 ⊆ v1` (The new `cache (v2)` is a strict subset of `v1`, proving the system didn't magically invent new files during a prune operation).
+        *   `Cache.Hashes == Valid` (Every file entry in the cache must have a successfully computed SHA-256 hash before proceeding).
+
+### Facet 5: The Topological View (The "Where")
+
+*   **Answers:** Where does this data physically rest, or over what network boundaries does it travel?
+*   **Focus:** Physical infrastructure, network topology, storage tiers, and data gravity.
+*   **Use Case:** Optimizing I/O bottlenecks, designing distributed systems, planning hardware infrastructure, and auditing data residency or security boundaries.
+
+**DSL Elements (Location Annotations & Data Gravity Indicators):**
+These annotations bind the logical data entities and their operations to physical hardware or network locations, making the cost of `[I] Ingest` and `[D] Distribute` operations explicitly clear.
+
+*   **Location Annotations (`@Location`):** Appended either to the Data Entity (Row Header) to denote where the data rests, or directly to an Operation Cell to denote where the compute/transfer is happening.
+    *   `@RAM` / `@Memory`: Data exists only in volatile memory.
+    *   `@LocalDisk` / `@NVMe`: Data rests on fast, local block storage.
+    *   `@NAS` / `@Network_SMB`: Data rests on remote, slow, or shared network storage.
+    *   `@Cloud_S3` / `@AWS`: Data rests in a cloud object store.
+*   **Data Gravity Indicators (`→` Transfers):** When an operation forces data to cross a topological boundary, you can denote the transfer explicitly.
+    *   *Example:* `[D] → @NAS` (Distributing a local cache over the network to a NAS).
+    *   *Example:* `[I] ← @Cloud_S3` (Ingesting a remote manifest down to local memory).
+
+### Facet 6: The Concurrency View (The "How Safely")
+
+*   **Answers:** Can multiple actors touch this data at the same time? Are these operations thread-safe, synchronous, or asynchronous?
+*   **Focus:** Parallelism, distributed state locks, race conditions, atomic operations, and system safety nets.
+*   **Use Case:** Designing multi-threaded architectures, distributed systems (like cross-network syncs), and database-level transactional guarantees.
+
+**DSL Elements (Locking Mechanisms & Atomicity Guarantees):**
+These annotations explicitly declare the thread-safety and read/write locking requirements for the operations defined in Petal 2.
+
+*   **Lock Annotations (`[Lock-*]`):** Appended directly to operations, these define the type of lock the system must acquire before reading or mutating the data entity.
+    *   `[Lock-R]` **Shared Read Lock:** Multiple processes can read this entity simultaneously (e.g., multiple worker nodes reading the same `jobs.json` file), but no process can write to it.
+    *   `[Lock-W]` **Exclusive Write Lock:** Only one process can mutate this entity (e.g., the primary orchestrator updating `cache.json` after a prune). All other reads/writes are blocked.
+*   **Atomicity Guarantees (`[Atomic]`):** Appended to operations that must succeed entirely or fail entirely without leaving the data in a corrupt intermediate state.
+    *   *Example:* `[D] [Atomic]` (Writing the `sync_manifest.json` completely to disk or rolling back the transaction if the disk fills up halfway).
+*   **Execution Markers (`[Async]` / `[Sync]`):** Appended to column headers (phases) or specific operations to denote whether the main application thread halts and waits, or fires and forgets.
+    *   *Example:* Phase Header: `4. Actuation [Async]` (The system launches background workers to perform network transfers).
 
 ## Generation Examples
 
