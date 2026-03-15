@@ -1,5 +1,7 @@
 import json
 from scanner.combinators import Pipeline, Load, Filter, Rule
+from scanner.nouns import Noun
+from typing import Any, Dict, List
 
 def query_pipeline(args):
     """
@@ -32,6 +34,27 @@ def format_output(matched, args):
             print(json.dumps(props, indent=4))
     if len(matched) > 50:
         print(f"  ... and {len(matched) - 50} more.")
+
+def resolve_items(resolver, args_parts):
+    """
+    Resolves file references into items.
+    URI Format: file:<rel_path> or file:all
+    """
+    db_items = resolver.get_database_items()
+    if not args_parts or args_parts[0] == 'all':
+        return db_items
+    
+    # Simple path match
+    path = args_parts[0]
+    if path in db_items:
+        return {path: db_items[path]}
+    
+    # Try to find by base name or partial rel path
+    matched = {}
+    for k, v in db_items.items():
+        if path.lower() in k.lower() or path.lower() in v.get('base_name', '').lower():
+            matched[k] = v
+    return matched
 
 def prune(args, master_scan_data):
     all_referenced_db_keys = set()

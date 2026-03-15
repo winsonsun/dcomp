@@ -1,7 +1,11 @@
----
-name: dsl-pdm
+name: pdm
 description: >
   **ARCHITECTURE SKILL** — Generate, format, review, and validate Process-Data Matrix (PDM) diagrams using the internal DSL. USE FOR: mapping end-to-end data pipelines; answering questions about state transitions and immutability; visualizing data lifecycle operations (ITVDE); applying formal constraints (Alloy) or Manager Workflows to architectural discussions. DO NOT USE FOR: writing general application code; generating UML sequence diagrams or flowcharts outside of the PDM matrix format.
+  
+  *Quick Prompts:*
+  - "Map the architecture of the XYZ module."
+  - "Show me the data lineage of the cache file."
+  - "Analyze the thread safety of the sync command."
 ---
 
 # Process-Data Matrix (PDM) DSL Skill
@@ -16,8 +20,11 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
     *   **Columns:** Represent chronological Application Phases (e.g., Configuration, Acquisition, Actuation).
     *   **Rows:** Represent immutable Data Entities (e.g., Physical Files, JSON caches, Action Manifests).
     *   **Cells:** Represent the operations performed on the entity during that phase.
-2. **Never leave cells blank ambiguously.** If no operation occurs, leave it empty `| |`, but if an entity is structurally required for a phase, ensure the `[I]` or `[T]` is present.
-3. **Always explain the Composition.** Before printing the Markdown table, explicitly state which "Facets" (Petals) you have composed for this specific matrix based on the user's question.
+2. **Guided Mode (Interactive Prompts):** If the user's request is vague (e.g., "Analyze the sync process" or "switch facet" or "dive deeper" without specifying exactly which facet or phase), do not guess. Use the `ask_user` tool to present options (e.g., "Which facet? 1. Lineage 2. Network 3. Concurrency" or "Which phase? 1. Input Resolution 2. Subtraction").
+3. **Never leave cells blank ambiguously.** If no operation occurs, leave it empty `| |`, but if an entity is structurally required for a phase, ensure the `[I]` or `[T]` is present.
+4. **Always explain the Composition.** Before printing the Markdown table, explicitly state which "Facets" (Petals) you have composed for this specific matrix based on the user's question.
+5. **Auto-Summarization (The 'So What?'):** After generating any matrix, provide a concise 2-3 bullet point summary highlighting the architectural bottlenecks, risks, or insights revealed by the diagram.
+6. **Optional Visualizations:** If the user explicitly requests a flowchart or visual diagram, generate a Mermaid.js diagram (`graph TD` or `sequenceDiagram`) representing the matrix's flow alongside the Markdown table. Do not generate Mermaid graphs by default unless requested.
 
 ## The Facets (Vocabularies)
 
@@ -98,15 +105,20 @@ Table Stack:
 | **Raw Data** | **[I]** Lookup | | |
 | *Violations* | | **[V]** Append (dst)| **[V]** Append (dst)|
 
-**Code Grounding Note:** When generating a micro-matrix (Layer 2 or deeper), you MUST include a comment below the matrix citing the specific source code files (`file_path: L#`) that power that phase to prove the matrix is grounded in reality.
+**Code Grounding Note:** When generating a micro-matrix (Layer 2 or deeper), you MUST include a visible Markdown blockquote below the matrix (e.g., `> **Code Grounding:** file_path: L#`) citing the specific source code files that power that phase to prove the matrix is grounded in reality. Do NOT use hidden HTML comments.
 
 ## Caching & The Dive Stack (State Management)
 To rapidly respond to semantic zoom requests (e.g., "Dive one layer deeper..."), you MUST maintain a stateful Dive Stack in `.gemini/pdm_stack_cache.md`.
 
 1. **Initialization / Cache Reset:** If the user asks for a completely *new* top-level architecture (unrelated to the current stack), you must OVERWRITE the cache file, discarding the old stack.
-2. **Reading the Stack:** When diving deeper, ALWAYS use `read_file` on `.gemini/pdm_stack_cache.md` first. This instantly gives you the current layer depth and the context of the entity being zoomed into.
-3. **Updating the Stack:** Append new micro-matrices to the cache file using `write_file`. If the file becomes excessively long, truncate the oldest (top-level) matrices from the cache and keep only the immediate parent layers to save context.
-4. **Optimized Targeting:** Use the cached column names and row entities to logically deduce which specific source file or module contains the sub-process to analyze, avoiding slow, wide `grep_search` commands across the whole project.
+2. **Multi-Facet Storage:** The cache file must act as a structured database. Organize the file by Layer (e.g., `## Layer 2: Phase 4 PDM`), and under each layer, store matrices by Facet (e.g., `### Facet: Core`, `### Facet: State Transition`). Never overwrite a previously generated facet when switching; simply append the new facet under the current layer's heading.
+3. **Reading the Stack:** When diving deeper or navigating the stack, ALWAYS use `read_file` on `.gemini/pdm_stack_cache.md` first. If the requested layer and facet already exist in the cache, retrieve and reuse it instantly instead of recalculating it.
+4. **Semantic Navigation (Up/Down/Switch):** 
+    *   **Up:** If the user asks to "zoom out" or "go back up", pop the active view to the parent layer. Reprint the parent's active facet from the cache.
+    *   **Down:** If the user asks to "dive deeper" or "zoom into [Phase X]", analyze the code, generate a micro-matrix, and append it under a new Layer heading in `.gemini/pdm_stack_cache.md` (e.g., `### Facet: Core`).
+    *   **Switch:** If the user asks to "switch to [Facet Y]" or "apply [Facet Y]", check the cache for the requested facet at the current layer. If it exists, reprint it. If not, read the respective facet file, generate the matrix using the new facet vocabulary (retaining Core Facets 1 & 2), append it under the current Layer's heading in `.gemini/pdm_stack_cache.md`, and reprint it.
+5. **Updating the Stack:** Append new micro-matrices to the cache file. If the file becomes excessively long, truncate the oldest (top-level) matrices from the cache and keep only the immediate parent layers to save context.
+6. **Optimized Targeting:** Use the cached column names and row entities to logically deduce which specific source file or module contains the sub-process to analyze, avoiding slow, wide `grep_search` commands across the whole project.
 
 ## Best Practices
 1. **Implementation Neutrality:** Keep the vocabulary language-agnostic. Focus on the abstract data structures ("Entities", "Manifests", "Caches", "Streams") and pure functional operations, rather than language-specific constructs (like classes, dicts, combinators, or specific libraries).
@@ -116,5 +128,5 @@ To rapidly respond to semantic zoom requests (e.g., "Dive one layer deeper..."),
     *   **Bold macro-entities** in the micro-matrix to show they are inherited inputs/outputs.
     *   **Italicize transient entities** that only exist within the zoomed context.
     *   **Number columns hierarchically** (e.g., Macro Phase 3 becomes Micro 3.1, 3.2).
-    *   **Code Grounding:** Whenever generating a micro-matrix (Layer 2 or deeper), you MUST include a comment below the matrix citing the specific source code files (`file_path: L#`) that power that phase.
+    *   **Code Grounding:** Whenever generating a micro-matrix (Layer 2 or deeper), you MUST include a visible Markdown blockquote below the matrix (e.g., `> **Code Grounding:** file_path: L#`) citing the specific source code files. Do NOT use HTML comments.
 3. **Keep it Data-Centric:** Do not include rows for transient, unimportant variables. Rows are for entities that carry business value or system state.

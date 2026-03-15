@@ -3,17 +3,20 @@ from pathlib import Path
 import os
 import sys
 
+from scanner.context import ScanContext
+
 class EntityResolver:
     """
     A unified interface to query and resolve entities across the pure JSON data architecture.
     Handles 'paths.json', 'jobs.json', 'metadata.json', and 'media_cache.json'.
     """
     
-    def __init__(self, media_cache_files=None, metadata_file="metadata.json", paths_file="~/.dcomp/paths.json", jobs_file="jobs.json"):
+    def __init__(self, media_cache_files=None, metadata_file="metadata.json", paths_file="~/.dcomp/paths.json", jobs_file="jobs.json", context=None):
         self.media_cache_files = media_cache_files or ["media_cache.json"]
         self.metadata_file = metadata_file
         self.paths_file = paths_file
         self.jobs_file = jobs_file
+        self.context = context
 
     def _load_json(self, filepath):
         p = Path(filepath)
@@ -26,16 +29,24 @@ class EntityResolver:
         return {}
 
     def get_scenes(self):
+        if self.context:
+            return self.context.scenes
         return self._load_json(self.metadata_file).get('scenes', {})
 
     def get_paths(self):
+        if self.context:
+            return self.context.paths
         data = self._load_json(self.paths_file)
         return data.get('paths', data)
 
     def get_jobs(self):
+        if self.context:
+            return self.context.jobs
         return self._load_json(self.jobs_file)
 
     def get_database_items(self):
+        if self.context:
+            return self.context.items
         # Merge items across all cache files
         items = {}
         for f in self.media_cache_files:
@@ -44,6 +55,8 @@ class EntityResolver:
         return items
 
     def get_job_trees(self):
+        if self.context:
+            return self.context.jobs
         trees = {}
         for f in self.media_cache_files:
             data = self._load_json(f)

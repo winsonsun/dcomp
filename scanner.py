@@ -29,6 +29,7 @@ import logging
 
 # Local I/O utilities (atomic write, logging setup)
 from io_utils import atomic_write_json, setup_basic_logging
+from scanner.context import ScanContext
 
 # --- 1. CORE CONSTANTS & UTILITIES ---
 
@@ -213,18 +214,27 @@ def scan_directory_incremental(base_path, old_items_map, do_hash=False):
     return new_items_map, new_db_items, db_images_map, db_videos_map, file_count
 
 
-def ensure_path_mappings(master_data):
-    if 'paths' not in master_data:
-        master_data['paths'] = {}
+def ensure_path_mappings(context):
+    if isinstance(context, ScanContext):
+        return # Paths are always present in ScanContext
+    if 'paths' not in context:
+        context['paths'] = {}
 
 
-def get_or_create_path_token(master_data, base_path, require_uuid=False):
+def get_or_create_path_token(context, base_path, require_uuid=False):
     """
     Create or reuse a PATHxx token for the given base_path.
     A token is unique to a base_path. It also stores device and UUID for resilience.
     """
+    # Normalize context to dict if necessary
+    if isinstance(context, ScanContext):
+        paths = context.paths
+    else:
+        ensure_path_mappings(context)
+        paths = context['paths']
+    
     # First, check for an exact match for the base_path. Only reuse if the path is identical.
-    for token, info in master_data.get('paths', {}).items():
+    for token, info in paths.items():
         if info.get('mount') == base_path:
             return token
 
@@ -251,7 +261,7 @@ def get_or_create_path_token(master_data, base_path, require_uuid=False):
     # If no exact path match was found, we must create a new token.
     # The old logic reused tokens based on device ID, which was incorrect for this use case.
     # We still store device/UUID info for potential future relocation tools.
-    existing = sorted([t for t in master_data.get('paths', {}).keys()])
+    existing = sorted(list(paths.keys()))
     next_idx = 1
     if existing:
         nums = []
@@ -266,7 +276,7 @@ def get_or_create_path_token(master_data, base_path, require_uuid=False):
     if require_uuid and not identifier:
         raise ValueError(f"UUID not available for path: {base_path}")
 
-    master_data.setdefault('paths', {})[token] = {'mount': base_path, 'device': dev, 'id': identifier, 'id_type': id_type}
+    paths[token] = {'mount': base_path, 'device': dev, 'id': identifier, 'id_type': id_type}
     return token
 
 
@@ -341,17 +351,24 @@ def get_mount_identifier(path):
     return None
 
 
-def resolve_token_path(master_data, token_path):
+def resolve_token_path(context, token_path):
     """Given a tokenized path like 'PATH01/some/relative', return the real absolute path
-    using the mapping in master_data['paths'].
+    using the mapping in context.paths.
     If the token is not found, return the original token_path.
     """
     if not token_path:
         return token_path
+    
+    # Normalize context to dict if necessary
+    if isinstance(context, ScanContext):
+        paths = context.paths
+    else:
+        paths = context.get('paths', {}) if isinstance(context, dict) else {}
+
     parts = token_path.split('/', 1)
     token = parts[0]
     rest = parts[1] if len(parts) > 1 else ''
-    mapping = master_data.get('paths', {}).get(token)
+    mapping = paths.get(token)
     if not mapping:
         return token_path
     mount = mapping.get('mount')
@@ -493,17 +510,12 @@ def load_jobs_file(job_file_path):
 
 def load_and_merge_scans(scan_file_paths, paths_file="~/.dcomp/paths.json", metadata_file="metadata.json"):
     """Loads one or more cache files and merges them into a master structure."""
-    master_output_data = {
-        "database": {"items": {}, "images": {}, "videos": {}},
-        "jobs": {},
-        "scenes": {},
-        "paths": {}
-    }
-    
+    context = ScanContext()
+
     # Normalize input to list
     if isinstance(scan_file_paths, str):
         scan_file_paths = [scan_file_paths]
-    
+
     print(f"Loading scan data from: {', '.join(scan_file_paths)}")
     for path in scan_file_paths:
         scan_path = Path(path)
@@ -511,29 +523,29 @@ def load_and_merge_scans(scan_file_paths, paths_file="~/.dcomp/paths.json", meta
             try:
                 with open(scan_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
+
                 # Merge Database Items
                 if "database" in data:
-                    master_output_data["database"]["items"].update(data["database"].get("items", {}))
-                    merge_media_dicts(master_output_data["database"]["images"], data["database"].get("images", {}))
-                    merge_media_dicts(master_output_data["database"]["videos"], data["database"].get("videos", {}))
-                
+                    context.database["items"].update(data["database"].get("items", {}))
+                    merge_media_dicts(context.database["images"], data["database"].get("images", {}))
+                    merge_media_dicts(context.database["videos"], data["database"].get("videos", {}))
+
                 # Merge Jobs
                 if "jobs" in data:
-                    master_output_data["jobs"].update(data.get("jobs", {}))
-                
+                    context.jobs.update(data.get("jobs", {}))
+
                 # Merge Scenes (Primary)
                 if "scenes" in data:
-                    merge_media_dicts(master_output_data["scenes"], data.get("scenes", {}))
-                
+                    merge_media_dicts(context.scenes, data.get("scenes", {}))
+
                 # Merge Paths (Legacy support: still read from cache if present)
                 if "paths" in data:
-                    master_output_data["paths"].update(data.get("paths", {}))
-                
+                    context.paths.update(data.get("paths", {}))
+
                 # Merge Legacy Entries (Migration Support)
                 if "entries" in data:
-                    merge_media_dicts(master_output_data["scenes"], data.get("entries", {}))
-                    
+                    merge_media_dicts(context.scenes, data.get("entries", {}))
+
             except Exception as e:
                 print(f"Warning: Could not parse '{path}'. Skipping. Error: {e}", file=sys.stderr)
         else:
@@ -547,9 +559,9 @@ def load_and_merge_scans(scan_file_paths, paths_file="~/.dcomp/paths.json", meta
                 paths_data = json.load(f)
                 if isinstance(paths_data, dict):
                     if "paths" in paths_data:
-                        master_output_data["paths"].update(paths_data["paths"])
+                        context.paths.update(paths_data["paths"])
                     else:
-                        master_output_data["paths"].update(paths_data)
+                        context.paths.update(paths_data)
         except Exception as e:
             print(f"Warning: Could not parse '{paths_file}'. Error: {e}", file=sys.stderr)
 
@@ -561,26 +573,36 @@ def load_and_merge_scans(scan_file_paths, paths_file="~/.dcomp/paths.json", meta
                 meta_data = json.load(f)
                 if isinstance(meta_data, dict):
                     if "scenes" in meta_data:
-                        merge_media_dicts(master_output_data["scenes"], meta_data.get("scenes", {}))
+                        merge_media_dicts(context.scenes, meta_data.get("scenes", {}))
         except Exception as e:
             print(f"Warning: Could not parse '{metadata_file}'. Error: {e}", file=sys.stderr)
+
     # After merging, canonicalize token mappings so the master data uses a
     # single canonical PATH token per mount and updates scenes/jobs to use it.
     try:
         from scanner.store import canonicalize_master_data
-        canonicalize_master_data(master_output_data)
+        master_dict = context.to_dict()
+        canonicalize_master_data(master_dict)
+        context = ScanContext.from_dict(master_dict)
     except Exception:
         # Non-fatal: if canonicalization fails, continue with merged data.
         pass
 
-    return master_output_data
+    return context
+
     
 
-def save_scan_data(scan_file_paths, data, data_was_modified, paths_file="~/.dcomp/paths.json", metadata_file="metadata.json"):
+def save_scan_data(scan_file_paths, context, data_was_modified, paths_file="~/.dcomp/paths.json", metadata_file="metadata.json"):
     """Saves the master data structure. Paths and Metadata are saved separately."""
     if not data_was_modified:
         logging.info("No changes to save.")
         return
+
+    # Normalize ScanContext to dict if necessary
+    if isinstance(context, ScanContext):
+        data = context.to_dict()
+    else:
+        data = context
 
     # Normalize input to list
     target_file = scan_file_paths
@@ -591,7 +613,6 @@ def save_scan_data(scan_file_paths, data, data_was_modified, paths_file="~/.dcom
     paths_data = data.get("paths", {})
     metadata_data = {"scenes": data.get("scenes", {})}
     cache_data = {k: v for k, v in data.items() if k not in ["paths", "scenes"]}
-
     logging.info("Saving updated cache data to '%s'...", target_file)
     try:
         atomic_write_json(target_file, cache_data, indent=2)
@@ -652,8 +673,8 @@ def run_diff_mode(args):
     if getattr(args, 'format', 'text') == 'text':
         print(f"--- Running in DIFF mode ---")
         
-    master_scan_data = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
-    db_items = master_scan_data.get("database", {}).get("items", {})
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    db_items = context.items
 
     def resolve_items_map_paths(items_map_local):
         # We only resolve paths physically if format is text (for human reading).
@@ -664,7 +685,7 @@ def run_diff_mode(args):
         for p, props in items_map_local.items():
             fp = props.get('full_path')
             if fp and isinstance(fp, str) and fp.startswith('PATH'):
-                real = resolve_token_path(master_scan_data, fp)
+                real = resolve_token_path(context, fp)
                 props['full_path'] = real
 
     if getattr(args, 'left', None) and getattr(args, 'right', None):
@@ -672,7 +693,8 @@ def run_diff_mode(args):
             media_cache_files=args.scan_files,
             metadata_file=getattr(args, 'metadata_file', 'metadata.json'),
             paths_file=getattr(args, 'paths_file', '~/.dcomp/paths.json'),
-            jobs_file=getattr(args, 'job_file', 'jobs.json')
+            jobs_file=getattr(args, 'job_file', 'jobs.json'),
+            context=context
         )
         try:
             items1_map = resolver.resolve_items(args.left)
@@ -711,7 +733,7 @@ def run_diff_mode(args):
                 print(f"\nCalculating Diff for: {job_name}...")
 
             try:
-                job_data = master_scan_data.get("jobs", {}).get(job_name, {})
+                job_data = context.jobs.get(job_name, {})
                 job_tree_1 = job_data.get('dir1')
                 job_tree_2 = job_data.get('dir2')
                 
@@ -844,14 +866,14 @@ def run_prune_mode(args):
     import importlib
     print(f"--- Running in PRUNE mode: Target = {args.target} ---")
     
-    master_scan_data = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
-    
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+
     noun_name = getattr(args, 'target', args.noun if hasattr(args, 'noun') else 'database').lower()
     if noun_name == 'database':
         noun_name = 'files'
-        
+
     module_path = f"scanner.nouns.{noun_name}"
-    
+
     try:
         noun_module = importlib.import_module(module_path)
     except ImportError:
@@ -860,10 +882,11 @@ def run_prune_mode(args):
 
     try:
         if hasattr(noun_module, 'prune'):
-            data_was_modified = noun_module.prune(args, master_scan_data)
-            
+            data_was_modified = noun_module.prune(args, context.to_dict())
+
             if data_was_modified and not getattr(args, 'dry_run', False):
-                save_scan_data(args.scan_files, master_scan_data, True, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+                save_scan_data(args.scan_files, context, True, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+
         else:
             print(f"Error: Noun '{noun_name}' does not support the 'prune' verb.")
     except Exception as e:
@@ -1063,12 +1086,12 @@ def run_paths_mode(args):
     Inspect and manipulate PATHxx token mappings stored in the scan cache.
     """
     print("--- Running in PATHS mode ---")
-    master_scan_data = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
-    ensure_path_mappings(master_scan_data)
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    ensure_path_mappings(context)
 
     # LIST
     if getattr(args, 'list', False):
-        paths = master_scan_data.get('paths', {})
+        paths = context.paths
         if not paths:
             print("No PATH mappings present in cache files.")
             return
@@ -1080,7 +1103,7 @@ def run_paths_mode(args):
 
     # RESOLVE
     if getattr(args, 'resolve', None):
-        resolved = resolve_token_path(master_scan_data, args.resolve)
+        resolved = resolve_token_path(context, args.resolve)
         print(resolved)
         return
 

@@ -1,5 +1,7 @@
 import json
 from scanner.combinators import Pipeline, Load, Filter, Rule
+from scanner.nouns import Noun
+from typing import Any, Dict, List
 
 def query_pipeline(args):
     """
@@ -45,3 +47,7 @@ def resolve_items(resolver, args_parts):
     ])
     
     return pipeline.execute(tree)
+
+def prune(args, master_scan_data):
+    """Pruning jobs is not yet implemented."""
+    return False

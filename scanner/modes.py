@@ -19,6 +19,7 @@ import json
 import logging
 import copy
 from pathlib import Path
+from scanner.context import ScanContext
 
 # To avoid circular dependency, scanner.py must not import from this file.
 # Instead, we may need to pass functions or data from scanner.py to these modes.
@@ -42,7 +43,7 @@ def run_scan_mode(args):
     logging.info("--- Running in SCAN mode (Combinator Pipeline) ---")
     jobs_config = load_jobs_file(args.job_file)
     job_config_was_modified = False
-    master_scan_data = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
     
     scan_data_was_modified = False
     
@@ -64,7 +65,7 @@ def run_scan_mode(args):
         if not job_name: continue
         
         logging.info("\nScanning Job: '%s' (%d/%d)...", job_name, i+1, len(jobs_to_scan))
-        master_scan_data.setdefault("jobs", {}).setdefault(job_name, {})
+        context.jobs.setdefault(job_name, {})
 
         for dir_key in sorted(job.keys()):
             if not dir_key.startswith("dir"): continue
@@ -73,8 +74,8 @@ def run_scan_mode(args):
             logging.info("  Scanning Path: %s -> %s", dir_key, base_path)
             
             try:
-                ensure_path_mappings(master_scan_data)
-                token = get_or_create_path_token(master_scan_data, base_path, require_uuid=args.uuid_only)
+                ensure_path_mappings(context)
+                token = get_or_create_path_token(context, base_path, require_uuid=args.uuid_only)
                 scan_data_was_modified = True
 
                 # Step 1: Physical Crawl
@@ -84,7 +85,7 @@ def run_scan_mode(args):
                 raw_items = crawl_pipeline.execute()
                 
                 # Check for incremental shortcut
-                old_items_map = master_scan_data.get("jobs", {}).get(job_name, {}).get(dir_key, {}).get("items_map", {})
+                old_items_map = context.jobs.get(job_name, {}).get(dir_key, {}).get("items_map", {})
                 if args.incremental and old_items_map:
                     # In a fully modular system, this would be a cache-hit Filter, but keeping it simple for now
                     skipped = 0
@@ -126,8 +127,8 @@ def run_scan_mode(args):
                 logging.info("    ... Found %d files.", file_count)
 
                 # Step 3: Update Media Groups
-                db_images = master_scan_data["database"].setdefault("images", {})
-                db_videos = master_scan_data["database"].setdefault("videos", {})
+                db_images = context.database.setdefault("images", {})
+                db_videos = context.database.setdefault("videos", {})
                 
                 for t_path, props in tokenized_db_items.items():
                     if props.get('type') != 'file': continue
@@ -162,36 +163,36 @@ def run_scan_mode(args):
                 for props in tokenized_db_items.values():
                     props.pop('_rel', None)
 
-                master_scan_data["database"]["items"].update(tokenized_db_items)
-                master_scan_data["jobs"][job_name][dir_key] = job_tree
+                context.database["items"].update(tokenized_db_items)
+                context.jobs[job_name][dir_key] = job_tree
                 scan_data_was_modified = True
 
             except Exception as e:
                 logging.exception("  An unexpected error occurred during scan for '%s': %s", dir_key, e)
 
     try:
-        save_master = copy.deepcopy(master_scan_data)
-        had_images = 'images' in save_master.get('database', {})
-        had_videos = 'videos' in save_master.get('database', {})
+        save_context = copy.deepcopy(context)
+        had_images = 'images' in save_context.database
+        had_videos = 'videos' in save_context.database
 
         if not getattr(args, 'images', None):
-            save_master.get('database', {}).pop('images', None)
+            save_context.database.pop('images', None)
         if not getattr(args, 'videos', None):
-            save_master.get('database', {}).pop('videos', None)
+            save_context.database.pop('videos', None)
 
         save_needed = scan_data_was_modified or (
             (had_images and not getattr(args, 'images', None)) or
             (had_videos and not getattr(args, 'videos', None))
         )
 
-        save_scan_data(args.scan_files, save_master, save_needed, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+        save_scan_data(args.scan_files, save_context, save_needed, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
         save_jobs_config(args.job_file, jobs_config, job_config_was_modified)
 
         from scanner.io import atomic_write_json
         if getattr(args, 'images', None):
             out_images = args.images if isinstance(args.images, str) and args.images else 'images.json'
             try:
-                atomic_write_json(out_images, master_scan_data.get('database', {}).get('images', {}), indent=2)
+                atomic_write_json(out_images, context.database.get('images', {}), indent=2)
                 logging.info("Wrote images export to '%s'", out_images)
             except Exception:
                 logging.exception("Failed to write images export to '%s'", out_images)
@@ -199,7 +200,7 @@ def run_scan_mode(args):
         if getattr(args, 'videos', None):
             out_videos = args.videos if isinstance(args.videos, str) and args.videos else 'videos.json'
             try:
-                atomic_write_json(out_videos, master_scan_data.get('database', {}).get('videos', {}), indent=2)
+                atomic_write_json(out_videos, context.database.get('videos', {}), indent=2)
                 logging.info("Wrote videos export to '%s'", out_videos)
             except Exception:
                 logging.exception("Failed to write videos export to '%s'", out_videos)
@@ -214,7 +215,7 @@ def run_scene_mode(args):
     from scanner.scene import analyze_scenes
 
     logging.info("--- Running in SCENE mode ---")
-    master_scan_data = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
 
     scene_owner_names = set()
     if args.scene_owner:
@@ -229,14 +230,17 @@ def run_scene_mode(args):
         except Exception as e:
             logging.warning("Could not load scene owner file '%s': %s", args.scene_owner, e)
 
-    master_scan_data, data_was_modified, unfound = analyze_scenes(
-        master_scan_data,
+    # analyze_scenes currently expects and returns raw dicts, we'll convert for now
+    master_dict = context.to_dict()
+    master_dict, data_was_modified, unfound = analyze_scenes(
+        master_dict,
         scene_owner_names=scene_owner_names,
         limit=getattr(args, 'scene_size_limit', 0),
         write_unfound=bool(getattr(args, 'unfound_videos', None)),
         debug=getattr(args, 'debug_scene', False),
         override_owner=getattr(args, 'override_owner', False)
     )
+    context = ScanContext.from_dict(master_dict)
     
     if getattr(args, 'unfound_videos', None) and isinstance(args.unfound_videos, str):
         try:
@@ -247,7 +251,7 @@ def run_scene_mode(args):
 
     if getattr(args, 'scene_list_file', None):
         try:
-            scenes_list = sorted(list(master_scan_data.get('scenes', {}).keys()))
+            scenes_list = sorted(list(context.scenes.keys()))
             try:
                 atomic_write_json(args.scene_list_file, scenes_list, indent=2)
                 logging.info("Wrote scene list to '%s'", args.scene_list_file)
@@ -256,6 +260,6 @@ def run_scene_mode(args):
         except Exception as e:
             logging.exception("Failed to prepare scene list: %s", e)
 
-    save_scan_data(args.scan_files, master_scan_data, data_was_modified, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    save_scan_data(args.scan_files, context, data_was_modified, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
     logging.info("--- SCENE mode complete ---")
 
