@@ -1,8 +1,8 @@
-Ran terminal command:  cat scanner.py | wc -l
+Ran terminal command:  cat dcomp.py | wc -l
 
-Ran terminal command:  cat scanner.py | grep -A 20 "def load_and_merge_scans"
+Ran terminal command:  cat dcomp.py | grep -A 20 "def load_and_merge_scans"
 
-Ran terminal command:  cat scanner.py | grep "import json"
+Ran terminal command:  cat dcomp.py | grep "import json"
 
 Based on my deep understanding of how this scanner program is being used (handling huge, cross-server media libraries, tracking paths by UUID, running multi-stage pipelines, and generating massive file-state datasets), here are my top 3 recommendations for improvement, ranked by impact.
 
@@ -11,7 +11,7 @@ Based on my deep understanding of how this scanner program is being used (handli
 ### 1. Memory Streaming (The JSON Parsing Bottleneck)
 **The Problem:** 
 Currently, `load_and_merge_scans` uses Python’s standard `json.load(f)`. For a tool scanning thousands of HD/4K videos across multiple drives, media_cache.json can easily exceed 200MB. 
-Because `json.load` reads the *entire file* into RAM at once, running scanner.py on a massive cache will eventually cause an `Out Of Memory (OOM)` crash, or at least severely hang the machine for 15+ seconds on startup just to parse the text.
+Because `json.load` reads the *entire file* into RAM at once, running dcomp.py on a massive cache will eventually cause an `Out Of Memory (OOM)` crash, or at least severely hang the machine for 15+ seconds on startup just to parse the text.
 
 **The Improvement:** 
 We must replace standard JSON loading with **Streaming JSON Parsing** (using a library like `ijson`). 
@@ -28,7 +28,7 @@ Implement an **`Async_FS_Scan`** combinator using Python’s `concurrent.futures
 
 ### 3. A Watcher Daemon (Continuous Sync)
 **The Problem:**
-The architecture currently requires you to manually execute the pipelines via the CLI (e.g., `python scanner.py scan`, then `python scanner.py scene`). It represents "Point-in-Time" processing.
+The architecture currently requires you to manually execute the pipelines via the CLI (e.g., `python dcomp.py scan`, then `python dcomp.py scene`). It represents "Point-in-Time" processing.
 
 **The Improvement:**
 You should implement a **Daemon Combinator** (`Watch`). 

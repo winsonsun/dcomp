@@ -1,6 +1,6 @@
 """nScene detection module scaffoldn
 This file will host scene analysis logic (the heavy-lifting currently inside
-`run_scene_mode` in `scanner.py`). For now it contains a small helper placeholder
+`run_scene_mode` in `dcomp.py`). For now it contains a small helper placeholder
 and a clear module-level docstring for the planned responsibilities.
 """
 from typing import Dict, Set, List, Any

@@ -1,29 +1,44 @@
 # Contributing to Scene Scanner
 
-Welcome! This guide will help you get started with contributing to the project. We've designed the architecture to be modular and easy to extend using a "Combinator DSL".
+Welcome! This guide will help you get started with contributing to the project. We've designed the architecture to be modular and easy to extend using a "Combinator DSL" and a "Noun-First CLI".
 
 ## Core Concepts
 
 1.  **Nouns**: Domain entities (Files, Scenes, Jobs, Paths).
-2.  **Combinators**: Small, reusable data processing blocks (Filter, Map, Group, etc.).
-3.  **Pipelines/Streams**: Chains of combinators that define a data workflow.
+2.  **Verbs**: Actions performed on Nouns (detect, query, prune, etc.).
+3.  **Combinators**: Small, reusable data processing blocks (Filter, Map, Group, etc.).
 4.  **ScanContext**: A typed object holding the state of the system.
 
 ## How to Add a New Noun
 
-Nouns represent something the scanner can "talk about". To add a new noun:
+To add a new noun and expose it to the CLI:
 
 1.  **Create a new module** in `scanner/nouns/` (e.g., `scanner/nouns/tags.py`).
 2.  **Implement the `Noun` Protocol**:
+    *   `register_cli(subparsers)`: Define your noun's subparser and its verbs.
     *   `query_pipeline(args)`: Return a `Pipeline` or `Stream` for searching.
     *   `format_output(matched, args)`: Print the results to the CLI.
     *   `resolve_items(resolver, args_parts)`: Turn a URI into a list of items.
     *   `prune(args, master_scan_data)`: Remove stale entries.
-3.  **Update the CLI**: Add any necessary arguments to `scanner.py` or `scanner/cli.py`.
+3.  **Dynamic Discovery**: The scanner automatically finds your module and registers its commands. No need to modify `dcomp.py`!
+
+## CLI Implementation Pattern
+
+We use a **Noun-First** structure: `python3 dcomp.py <noun> <verb>`.
+
+Example implementation in your noun module:
+```python
+def register_cli(subparsers):
+    p_noun = subparsers.add_parser("mynoun", help="Description")
+    noun_sub = p_noun.add_subparsers(dest="verb", required=True)
+    
+    p_myverb = noun_sub.add_parser("myverb", help="Action")
+    p_myverb.set_defaults(func=run_myverb_logic)
+```
 
 ## How to Create a Data Pipeline
 
-Using the new Fluent API, creating a data pipeline is straightforward.
+Using the Fluent API, creating a data pipeline is straightforward.
 
 ```python
 from scanner.combinators import Stream, Load
@@ -41,22 +56,12 @@ def my_custom_workflow(args):
     return results
 ```
 
-## How to Add a New Combinator
-
-If you need a new type of data transformation:
-
-1.  **Inherit from `Combinator`** in `scanner/combinators.py`.
-2.  **Auto-wrap rules** in your `__init__` using `Rule(your_arg)`.
-3.  **Implement `__call__(self, data)`**, ensuring you handle both lists and dictionaries.
-4.  **Add a method to `Stream`** if you want it to be part of the fluent API.
-
 ## Code Standards
 
 *   **Immutability**: Never modify the input `data` in a combinator. Always return a new object.
 *   **Type Safety**: Use the `ScanContext` object instead of raw dictionaries where possible.
-*   **Discoverability**: Use typed objects and properties to help IDEs provide better autocompletion.
-*   **Testing**: Add a unit test in `tests/` for any new combinator or noun.
+*   **Decentralization**: Keep CLI logic and business logic for a noun inside its respective module in `scanner/nouns/`.
 
-## Getting Help
-
-If you're stuck, check the `doc/PRD_COMBINATORS.md` for a deeper dive into the architectural philosophy.
+## Testing
+Add a unit test in `tests/` for any new combinator or noun. Run tests with:
+`python3 -m unittest discover -v`

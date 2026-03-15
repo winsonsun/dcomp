@@ -2,7 +2,7 @@
 Package initializer for the scanner package.
 
 This module exposes core helper functions by loading the top-level
-`scanner.py` implementation at runtime to avoid import name conflicts
+`dcomp.py` implementation at runtime to avoid import name conflicts
 between the package and the top-level script during refactoring.
 
 Note: We deliberately do NOT import submodules that depend on this
@@ -12,7 +12,7 @@ import importlib.util
 import os
 
 _root = os.path.dirname(os.path.dirname(__file__))
-_main_path = os.path.join(_root, 'scanner.py')
+_main_path = os.path.join(_root, 'dcomp.py')
 
 if os.path.exists(_main_path):
 	spec = importlib.util.spec_from_file_location("_scanner_main", _main_path)

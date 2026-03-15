@@ -1,7 +1,102 @@
 import json
+import os
+import sys
+import logging
+from pathlib import Path
 from scanner.combinators import Pipeline, Load, Filter, Rule
 from scanner.nouns import Noun
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
+
+def register_cli(subparsers):
+    """Registers the 'scenes' noun and its verbs."""
+    p_scenes = subparsers.add_parser("scenes", help="Detect, query, and prune scenes.")
+    scene_sub = p_scenes.add_subparsers(dest="verb", required=True, help="Scene verbs")
+
+    # Verb: detect
+    p_detect = scene_sub.add_parser("detect", help="Run heuristic scene detection.")
+    p_detect.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
+    p_detect.add_argument("-p", "--paths-file", default="~/.dcomp/paths.json", help="Paths registry JSON file.")
+    p_detect.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata (scenes, tags) JSON file.")
+    p_detect.add_argument("-n", "--name", help="Optional: Limit analysis to this job's trees.")
+    p_detect.add_argument("--scene-size-limit", type=int, default=300 * 1024 * 1024, help="Size threshold (Default: 300MB).")
+    p_detect.add_argument("--scene-list-file", help="Export list of detected scene names to JSON.")
+    p_detect.add_argument("--scene-owner", help="JSON file with a list of owner names.")
+    p_detect.add_argument("--unfound-videos", help="Output JSON list of unmatched video files.")
+    p_detect.add_argument("--debug-scene", action='store_true', help="Print debug info.")
+    p_detect.add_argument("--override-owner", action='store_true', help="Overwrite existing scene owner.")
+    p_detect.set_defaults(func=run_detect_verb)
+
+    # Verb: query
+    p_query = scene_sub.add_parser("query", help="Search for scenes in metadata.")
+    p_query.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
+    p_query.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata JSON file.")
+    p_query.add_argument("--owner", help="Filter by owner.")
+    p_query.add_argument("--scene", help="Filter by scene name.")
+    p_query.add_argument("-v", "--verbose", action='store_true', help="Show full scene details.")
+    p_query.set_defaults(func=run_query_verb)
+
+    # Verb: prune
+    p_prune = scene_sub.add_parser("prune", help="Remove empty or invalid scenes.")
+    p_prune.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
+    p_prune.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata JSON file.")
+    p_prune.add_argument("--dry-run", action='store_true', help="Show what would be pruned.")
+    p_prune.set_defaults(func=run_prune_verb)
+
+    # Verb: generate
+    p_gen = scene_sub.add_parser("generate", help="Generate scene owner file from directory names.")
+    p_gen.add_argument("--path", required=True, help="Path to directory with scene subfolders.")
+    p_gen.add_argument("--output-file", default="scene_owner.json", help="Output file to generate.")
+    p_gen.set_defaults(func=run_generate_verb)
+
+def run_detect_verb(args):
+    from scanner.modes import run_scene_mode
+    run_scene_mode(args)
+
+def run_query_verb(args):
+    pipeline = query_pipeline(args)
+    matched = pipeline.execute()
+    format_output(matched, args)
+
+def run_prune_verb(args):
+    from scanner import load_and_merge_scans, save_scan_data
+    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+    data_was_modified = prune(args, context.to_dict())
+    if data_was_modified and not args.dry_run:
+        save_scan_data(args.scan_files, context, True, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
+
+def run_generate_verb(args):
+    """Implementation of 'scanner scenes generate'."""
+    from io_utils import atomic_write_json
+    print(f"--- Generating Scene Owner List ---")
+    source_path = Path(args.path)
+    if not source_path.is_dir():
+        print(f"Error: '{args.path}' is not a directory.", file=sys.stderr)
+        return
+
+    output_file = Path(args.output_file)
+    existing_scenes = set()
+    if output_file.exists():
+        try:
+            with open(output_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    existing_scenes = {s.upper() for s in data}
+        except Exception as e:
+            print(f"Warning: Could not read existing file: {e}")
+
+    newly_found = set()
+    for item in source_path.iterdir():
+        if item.is_dir():
+            newly_found.add(item.name.upper())
+
+    combined = sorted(list(existing_scenes | newly_found))
+    new_count = len(combined) - len(existing_scenes)
+
+    if new_count > 0 or not output_file.exists():
+        print(f"Added {new_count} new scene names. Total: {len(combined)}")
+        atomic_write_json(str(output_file), combined, indent=2)
+    else:
+        print("No new scenes found.")
 
 def query_pipeline(args):
     """

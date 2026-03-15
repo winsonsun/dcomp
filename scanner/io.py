@@ -31,7 +31,7 @@ def atomic_write_json(path, data, *, indent=2):
         os.replace(tmp, path)
 
 
-# Placeholder exports — real implementations live in scanner.py for now.
+# Placeholder exports — real implementations live in dcomp.py for now.
 # During a full refactor we'll move the implementations here and update imports.
 __all__ = [
     'IMAGE_EXTENSIONS',

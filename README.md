@@ -6,8 +6,8 @@ A professional tool for scanning directory metadata, managing jobs, detecting "s
 
 *   **Combinator DSL**: Built on a modular Domain-Specific Language (DSL) of functional combinators.
 *   **Fluent API**: Clean, chainable syntax for building complex data pipelines.
+*   **Noun-First CLI**: Resource-oriented command structure (`scanner <noun> <verb>`) for high extensibility.
 *   **Tokenized Path Management**: Tracks physical drives by UUID; update the mount point once, and millions of file references stay valid.
-*   **Universal Search Engine**: Query any domain entity (Files, Scenes, Jobs, Paths) using a unified search interface.
 *   **Distributed Sync**: Plan sync manifests on one machine and execute them on another with automatic path translation.
 
 ## Quick Start
@@ -15,30 +15,36 @@ A professional tool for scanning directory metadata, managing jobs, detecting "s
 ### Installation
 Ensure you have Python 3.8+ installed. No external dependencies are required for the core engine.
 
-### Scan a directory
+### Manage Jobs
 ```bash
 # Add a directory to the default job
-python3 scanner.py job -d /Volumes/Media/Movies
+python3 dcomp.py jobs manage -d /Volumes/Media/Movies
 
-# Perform the scan
-python3 scanner.py scan --hash
+# List configured jobs
+python3 dcomp.py jobs list
 ```
 
-### Detect Scenes
+### Scan and Detect
 ```bash
-# Run detection using directory name heuristics
-python3 scanner.py scene --scene-owner owners.json
+# Perform the scan
+python3 dcomp.py scan --hash
+
+# Detect scenes using directory name heuristics
+python3 dcomp.py scenes detect --scene-owner owners.json
 ```
 
 ### Query Data
 ```bash
 # Find all large video files
-python3 scanner.py query files --ext .mp4 --size-gt 5000000000
+python3 dcomp.py files query --ext .mp4 --size-gt 5000000000
+
+# Search for specific scenes
+python3 dcomp.py scenes query --scene BMW-222
 ```
 
 ## For Developers
 
-The project uses a **Combinator-based architecture**. Instead of writing procedural loops, you compose data transformations.
+The project uses a **Combinator-based architecture**. You can easily add new Nouns and Verbs without touching the core engine.
 
 ### Example: Custom Pipeline
 ```python
@@ -51,35 +57,25 @@ results = (Stream(Load("cache.json", "database.items"))
            .execute())
 ```
 
-See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details and [doc/CONTRIBUTING.md](doc/CONTRIBUTING.md) for a guide on how to add new Nouns and Combinators.
+See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details and [doc/CONTRIBUTING.md](doc/CONTRIBUTING.md) for a guide on how to add new Nouns and Verbs.
 
-## Command Overview
+## Command Overview (Noun-First)
 
--   `job`: Create, update, and manage job definitions.
--   `paths`: Manage robust physical volume tracking (tokens).
--   `scan`: Ingest directory metadata into the cache.
--   `diff`: Universal comparison engine (scenes, jobs, or raw paths).
--   `scene`: Detect "scenes" using modular detection combinators.
--   `query`: Search and filter domain entities.
--   `sync`: Distributed, stateful synchronization.
--   `prune`: Universal garbage collection for the cache.
+*   **`jobs`**: `list`, `manage`
+*   **`scenes`**: `detect`, `query`, `prune`, `generate`
+*   **`files`**: `query`, `prune`
+*   **`paths`**: `list`, `resolve`, `tokenize`, `update`, `get`
+*   **Global Verbs**: `scan`, `diff`, `sync`, `merge`
 
 ---
 
 ## Technical Details
 
-### Path Management
-The scanner uses a tokenization system (`PATH01`, `PATH02`, etc.) to track physical hard drives. If you move a drive to a new mount point, simply update the token:
-
-```bash
-python3 scanner.py paths --update-token PATH01 --new-mount /Volumes/NewDrive
-```
-
 ### ScanContext
-The system state is managed through a typed `ScanContext` object, replacing the old, deeply-nested dictionaries with discoverable, IDE-friendly properties.
+The system state is managed through a typed `ScanContext` object, replacing old, deeply-nested dictionaries with discoverable, IDE-friendly properties.
 
-### Scene Detection
-Detection is broken down into modular combinators like `DetectOwners` and `DetectLargeFiles`, orchestrated via the fluent DSL.
+### Modular CLI
+Each noun in `scanner/nouns/` is a plugin that defines its own CLI verbs, making the system highly extensible.
 
 ---
 

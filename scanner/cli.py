@@ -2,7 +2,7 @@
 CLI helpers and argument processing scaffold
 
 This module will eventually host parsing helpers, common CLI utilities,
-and any small adapter logic to keep `scanner.py` focused on wiring modes.
+and any small adapter logic to keep `dcomp.py` focused on wiring modes.
 """
 import argparse
 

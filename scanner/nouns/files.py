@@ -3,6 +3,41 @@ from scanner.combinators import Pipeline, Load, Filter, Rule
 from scanner.nouns import Noun
 from typing import Any, Dict, List
 
+def register_cli(subparsers):
+    """Registers the 'files' noun and its verbs."""
+    p_files = subparsers.add_parser("files", help="Query and prune database files.")
+    file_sub = p_files.add_subparsers(dest="verb", required=True, help="File verbs")
+
+    # Verb: query
+    p_query = file_sub.add_parser("query", help="Search for files in the database.")
+    p_query.add_argument("-s", "--scan-files", default=["cache.json", "media_cache.json"], nargs='+', help="Scan cache files.")
+    p_query.add_argument("--ext", help="Filter by extension (e.g. .mp4).")
+    p_query.add_argument("--size-gt", type=int, help="Filter by minimum size in bytes.")
+    p_query.add_argument("-v", "--verbose", action='store_true', help="Show full file details.")
+    p_query.set_defaults(func=run_query_verb)
+
+    # Verb: prune
+    p_prune = file_sub.add_parser("prune", help="Remove unreferenced files from the database.")
+    p_prune.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
+    p_prune.add_argument("--dry-run", action='store_true', help="Show what would be pruned.")
+    p_prune.set_defaults(func=run_prune_verb)
+
+def run_query_verb(args):
+    """Implementation of 'scanner files query'."""
+    pipeline = query_pipeline(args)
+    matched = pipeline.execute()
+    format_output(matched, args)
+
+def run_prune_verb(args):
+    """Implementation of 'scanner files prune'."""
+    from scanner import load_and_merge_scans, save_scan_data
+    context = load_and_merge_scans(args.scan_files)
+    
+    data_was_modified = prune(args, context.to_dict())
+    
+    if data_was_modified and not args.dry_run:
+        save_scan_data(args.scan_files, context, True)
+
 def query_pipeline(args):
     """
     Generated LLM Monad for Querying Files

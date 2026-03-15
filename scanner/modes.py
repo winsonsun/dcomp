@@ -7,13 +7,13 @@ import logging
 from pathlib import Path
 from scanner.io import atomic_write_json
 from scanner.store import canonicalize_master_data
-# Import other necessary helpers from scanner.py as they are modularized
+# Import other necessary helpers from dcomp.py as they are modularized
 
 # NOTE: For this refactor, we will copy the entire function bodies from
-# scanner.py into this file. The original scanner.py will be updated to
+# dcomp.py into this file. The original dcomp.py will be updated to
 # import and call these functions.
 
-# Placeholder for functions to be moved from scanner.py
+# Placeholder for functions to be moved from dcomp.py
 
 import json
 import logging
@@ -21,8 +21,8 @@ import copy
 from pathlib import Path
 from scanner.context import ScanContext
 
-# To avoid circular dependency, scanner.py must not import from this file.
-# Instead, we may need to pass functions or data from scanner.py to these modes.
+# To avoid circular dependency, dcomp.py must not import from this file.
+# Instead, we may need to pass functions or data from dcomp.py to these modes.
 # For now, we will duplicate some helper function calls and assume they will
 # be moved to more appropriate modules later.
 

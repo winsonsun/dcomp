@@ -33,3 +33,9 @@ class Noun(Protocol):
         Returns True if data was modified.
         """
         ...
+
+    def register_cli(self, subparsers: Any) -> None:
+        """
+        Registers noun-specific sub-commands (verbs) and arguments.
+        """
+        ...

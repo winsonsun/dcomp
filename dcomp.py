@@ -26,6 +26,8 @@ import copy
 import os
 import hashlib
 import logging
+import pkgutil
+import importlib
 
 # Local I/O utilities (atomic write, logging setup)
 from io_utils import atomic_write_json, setup_basic_logging
@@ -1396,6 +1398,16 @@ if __name__ == "__main__":
     
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Operation Mode")
     
+    # --- DYNAMIC NOUN DISCOVERY ---
+    import scanner.nouns as nouns
+    for loader, module_name, is_pkg in pkgutil.walk_packages(nouns.__path__, nouns.__name__ + "."):
+        try:
+            module = importlib.import_module(module_name)
+            if hasattr(module, 'register_cli'):
+                module.register_cli(subparsers)
+        except Exception as e:
+            print(f"Warning: Failed to load noun module {module_name}: {e}", file=sys.stderr)
+
     # --- SCAN PARSER ---
     p_scan = subparsers.add_parser("scan", help="Ingest directory metadata from disk.")
     p_scan.add_argument("-j", "--job-file", default="jobs.json", help="Job definitions file.")
@@ -1409,21 +1421,6 @@ if __name__ == "__main__":
     p_scan.add_argument("--hash", action='store_true', help="Generate SHA-256 hashes for files to detect content changes.")
     p_scan.add_argument("--incremental", action='store_true', help="Skip files that have not changed in size or timestamp since the last scan.")
     p_scan.set_defaults(func=run_scan_mode, uuid_only=True)
-
-    # --- SCENE PARSER ---
-    p_scene = subparsers.add_parser("scene", help="Analyze cache for Scenes (Incremental).")
-    p_scene.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
-    p_scene.add_argument("-p", "--paths-file", default="~/.dcomp/paths.json", help="Paths registry JSON file.")
-    p_scene.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata (scenes, tags) JSON file.")
-    p_scene.add_argument("-n", "--name", help="Optional: Limit analysis to this job's trees.")
-    p_scene.add_argument("--scene-size-limit", type=int, default=300 * 1024 * 1024, help="Size threshold in bytes (Default: 300MB).")
-    p_scene.add_argument("--scene-list-file", help="Optional: Export list of detected scene names to JSON.")
-    p_scene.add_argument("--scene-reset", action="store_true", help="Clear existing scenes before analysis.")
-    p_scene.add_argument("--scene-owner", help="JSON file with a list of owner names for scene detection.")
-    p_scene.add_argument("--unfound-videos", help="Output a JSON list of video files that did not match any scene.")
-    p_scene.add_argument("--debug-scene", action='store_true', help="Print debug info during scene processing.")
-    p_scene.add_argument("--override-owner", action='store_true', help="Overwrite existing scene owner (if it is not 'default') with a newly detected one.")
-    p_scene.set_defaults(func=run_scene_mode)
 
     # --- DIFF PARSER ---
     p_diff = subparsers.add_parser("diff", help="Universal Comparison Engine. Compare generic entities or legacy jobs.")
@@ -1462,72 +1459,6 @@ if __name__ == "__main__":
     p_merge.add_argument("--out", required=True, help="The output JSON file path.")
     p_merge.add_argument("--rule", help="Optional JSON file defining conflict resolution policies.")
     p_merge.set_defaults(func=run_merge_mode)
-
-    # --- PATHS PARSER ---
-    p_paths = subparsers.add_parser("paths", help="Inspect or resolve PATHxx token mappings.")
-    p_paths.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan/cache files to read/write.")
-    p_paths.add_argument("-p", "--paths-file", default="~/.dcomp/paths.json", help="Paths registry JSON file.")
-    p_paths.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata (scenes, tags) JSON file.")
-    p_paths.add_argument("--list", action='store_true', help="List PATHxx -> mount/device/uuid mappings.")
-    p_paths.add_argument("--resolve", help="Resolve a tokenized path (e.g. PATH01/rel/path) to a real path.")
-    p_paths.add_argument("--tokenize", help="Find the PATH token for a mounted path, e.g. /Volumes/Data. Use --create to add if missing.")
-    p_paths.add_argument("--create", action='store_true', help="With --tokenize, create a new PATH token if one does not exist.")
-    p_paths.add_argument("--save", action='store_true', help="Save changes to the first scan file when creating tokens.")
-    p_paths.add_argument("--update-token", metavar="TOKEN", help="Manually update an existing token (e.g. PATH01). Must be used with --new-mount.")
-    p_paths.add_argument("--new-mount", metavar="PATH", help="The new mount path to assign to the token specified by --update-token.")
-    p_paths.add_argument("--get", help="Read and print the file at a token path (e.g. PATH01/dir/file.jpg).")
-    p_paths.add_argument("--no-uuid-only", dest='uuid_only', action='store_false', help="Disable requiring filesystem UUID when creating tokens.")
-    p_paths.set_defaults(func=run_paths_mode, uuid_only=True)
-
-    # --- JOB PARSER ---
-    p_job = subparsers.add_parser("job", help="Create, update, or inspect jobs.")
-    p_job.add_argument("-j", "--job-file", default="jobs.json", help="Job definitions file.")
-    p_job.add_argument("-n", "--name", help="Specific job name to create/update.")
-    p_job.add_argument("--dir1", help="Path 1 for a named job.")
-    p_job.add_argument("--dir2", help="Path 2 for a named job.")
-    p_job.add_argument("-d", "--dir", action='append', help="Paths to add to the 'default' job.")
-    p_job.add_argument("--lsdir", action='store_true', help="List configured dirN keys and paths for selected jobs.")
-    p_job.add_argument("--define-job", nargs=3, metavar=('JOB','IDX1','IDX2'),
-                        help="Create/set JOB using two dir keys or indices from the 'default' job (e.g. 'dir1' or '1').")
-    p_job.add_argument("--mv", action='store_true', help="When used with --define-job, remove entries from the 'default' job.")
-    p_job.set_defaults(func=run_job_mode)
-
-    # --- PRUNE PARSER ---
-    p_prune = subparsers.add_parser("prune", help="Universal Garbage Collection for nouns (database, scenes, paths).")
-    p_prune.add_argument("--target", choices=["database", "scenes", "paths"], default="database", help="Which noun to prune.")
-    p_prune.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files to prune.")
-    p_prune.add_argument("-p", "--paths-file", default="~/.dcomp/paths.json", help="Paths registry JSON file.")
-    p_prune.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata (scenes, tags) JSON file.")
-    p_prune.add_argument("--dry-run", action='store_true', help="Show what would be pruned without making changes.")
-    p_prune.set_defaults(func=run_prune_mode)
-
-    # --- GEN-SCENES PARSER ---
-    p_gen_scenes = subparsers.add_parser("gen-scenes", help="Generate a scene_owner.json file from a directory structure.")
-    p_gen_scenes.add_argument("--path", required=True, help="Path to the directory containing scene-named subfolders.")
-    p_gen_scenes.add_argument("--output-file", default="scene_owner.json", help="Output file to generate or update.")
-    p_gen_scenes.set_defaults(func=run_gen_scenes_mode)
-
-    # --- QUERY PARSER ---
-    p_query = subparsers.add_parser("query", help="Universal Search Engine for Nouns (scenes, paths, files, jobs).")
-    p_query.add_argument("noun", choices=['scenes', 'paths', 'files', 'jobs'], help="The type of entity to query.")
-    p_query.add_argument("-j", "--job-file", default="jobs.json", help="Job definitions file.")
-    p_query.add_argument("-s", "--scan-files", default=["cache.json", "media_cache.json"], nargs='+', help="Scan cache files to query.")
-    p_query.add_argument("-p", "--paths-file", default="~/.dcomp/paths.json", help="Paths registry JSON file.")
-    p_query.add_argument("-m", "--metadata-file", default="metadata.json", help="Metadata (scenes, tags) JSON file.")
-    
-    # Scene filters
-    p_query.add_argument("--owner", help="Find all scenes for a specific owner (partial match supported).")
-    p_query.add_argument("--scene", help="Find scenes matching a specific name (partial match supported).")
-    
-    # Path filters
-    p_query.add_argument("--mount", help="Find paths matching a specific mount point.")
-    
-    # File filters
-    p_query.add_argument("--ext", help="Find files with a specific extension (e.g. '.mp4').")
-    p_query.add_argument("--size-gt", type=int, help="Find files larger than this size in bytes.")
-
-    p_query.add_argument("-v", "--verbose", action='store_true', help="Print the full JSON details for each matched entity.")
-    p_query.set_defaults(func=run_query_mode)
 
     args = parser.parse_args()
     
