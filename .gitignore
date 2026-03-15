@@ -7,3 +7,4 @@ tests
 *.pyc
 full_dump.txt
 .env
+temp/*
