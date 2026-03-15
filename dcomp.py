@@ -1400,7 +1400,16 @@ if __name__ == "__main__":
     
     # --- DYNAMIC NOUN DISCOVERY ---
     import scanner.nouns as nouns
+    
+    DEV_NOUNS = {'plugin'}
+    
     for loader, module_name, is_pkg in pkgutil.walk_packages(nouns.__path__, nouns.__name__ + "."):
+        short_name = module_name.split('.')[-1]
+        
+        # Skip developer nouns like 'plugin'
+        if short_name in DEV_NOUNS:
+            continue
+            
         try:
             module = importlib.import_module(module_name)
             if hasattr(module, 'register_cli'):

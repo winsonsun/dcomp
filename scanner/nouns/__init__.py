@@ -39,3 +39,10 @@ class Noun(Protocol):
         Registers noun-specific sub-commands (verbs) and arguments.
         """
         ...
+
+    def get_rules(self, phase: str, context: Any) -> List[Any]:
+        """
+        Returns a list of Rule objects for a specific application phase.
+        Common phases: 'pre_scan', 'post_scan', 'pre_diff', 'post_diff'.
+        """
+        ...

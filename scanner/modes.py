@@ -37,8 +37,9 @@ def run_scan_mode(args):
     """
     import os
     from scanner import load_jobs_file, load_and_merge_scans, save_scan_data, save_jobs_config, ensure_path_mappings, get_or_create_path_token
-    from scanner.combinators import Pipeline, FS_Scan, Map, BuildTree, Rule
+    from scanner.combinators import Pipeline, FS_Scan, Map, BuildTree, Rule, Filter
     from scanner.io import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+    import scanner.policy as policy
 
     logging.info("--- Running in SCAN mode (Combinator Pipeline) ---")
     jobs_config = load_jobs_file(args.job_file)
@@ -78,10 +79,16 @@ def run_scan_mode(args):
                 token = get_or_create_path_token(context, base_path, require_uuid=args.uuid_only)
                 scan_data_was_modified = True
 
+                # --- PIPELINE COMPILATION ---
                 # Step 1: Physical Crawl
-                crawl_pipeline = Pipeline([
-                    FS_Scan(base_path, do_hash=args.hash)
-                ])
+                scan_steps = [FS_Scan(base_path, do_hash=args.hash)]
+                
+                # Step 2: Inject pre_scan rules (e.g. global filters)
+                pre_scan_rules = policy.get_rules('pre_scan', context)
+                for r in pre_scan_rules:
+                    scan_steps.append(Filter(r))
+                
+                crawl_pipeline = Pipeline(scan_steps)
                 raw_items = crawl_pipeline.execute()
                 
                 # Check for incremental shortcut
@@ -111,9 +118,14 @@ def run_scan_mode(args):
                     new_props['_rel'] = rel
                     return (tokenized_path, new_props)
 
-                token_pipeline = Pipeline([
-                    Map(Rule(apply_tokens))
-                ])
+                token_steps = [Map(Rule(apply_tokens))]
+                
+                # Step 2.5: Inject post_scan rules (e.g. auto-tagging, property injection)
+                post_scan_rules = policy.get_rules('post_scan', context)
+                for r in post_scan_rules:
+                    token_steps.append(Map(r))
+
+                token_pipeline = Pipeline(token_steps)
                 tokenized_list = token_pipeline.execute(raw_items)
                 
                 # Unpack
