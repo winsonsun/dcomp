@@ -57,6 +57,7 @@ If the user specifically asks a question about data lineage, functional purity, 
 *   **Facet 5: Topological (Location & Transfers):** `read_file("doc/dsl-pdm/facets/topological.md")`
 *   **Facet 6: Concurrency (Locks & Safety):** `read_file("doc/dsl-pdm/facets/concurrency.md")`
 *   **Facet 7: Structural (Conclusions & Refactoring):** `read_file(".gemini/skills/pdm/facets/structural.md")`
+*   **Facet 8: Extensibility Contract (Hook Definitions):** `read_file(".gemini/skills/pdm/facets/extensibility.md")`
 
 ## Multi-Layered Composition (Semantic Zoom & Anchoring)
 If the user asks to dive deep into a specific logic phase across multiple layers. 

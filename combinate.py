@@ -22,6 +22,9 @@ INTERNAL_NOUNS = {'plugin', 'files', 'scenes', 'jobs', 'paths', 'fs', '__init__'
 # UTILITIES
 # ==========================================
 
+class MockArgs:
+    def __init__(self, **kwargs): self.__dict__.update(kwargs)
+
 class SimpleYAML:
     @staticmethod
     def parse(content):
@@ -66,6 +69,190 @@ class SimpleYAML:
         data['phases'] = phases
         return data
 
+import ast
+
+class FPAnalyzer(ast.NodeVisitor):
+    """Analyzes a function's AST to determine suitability for Functional Pipeline injection."""
+    def __init__(self):
+        self.nonlocals = set()
+        self.globals = set()
+        self.io_calls = set()
+        self.mutations = set()
+        self.seams = []
+        self.max_depth = 0
+        self.current_depth = 0
+        self.has_return = False
+        self.lines = 0
+
+    def _find_seams(self, body):
+        """Recursively find data-flow seams in a list of AST nodes."""
+        created_vars = {}
+        for child in body:
+            if isinstance(child, ast.Assign):
+                for target in child.targets:
+                    if isinstance(target, ast.Name):
+                        created_vars[target.id] = child.lineno
+            elif isinstance(child, (ast.Call, ast.Expr, ast.Assign)):
+                # Extract the actual call node
+                call_node = None
+                if isinstance(child, ast.Call): call_node = child
+                elif isinstance(child, ast.Expr) and isinstance(child.value, ast.Call): call_node = child.value
+                elif isinstance(child, ast.Assign) and isinstance(child.value, ast.Call): call_node = child.value
+                
+                if call_node:
+                    # Check args and keywords for used variables
+                    used_vars = []
+                    for arg in call_node.args:
+                        if isinstance(arg, ast.Name): used_vars.append(arg.id)
+                    for kw in call_node.keywords:
+                        if isinstance(kw.value, ast.Name): used_vars.append(kw.value.id)
+                        
+                    for var in used_vars:
+                        if var in created_vars and created_vars[var] < child.lineno:
+                            self.seams.append(f"Line {child.lineno}: After '{var}' generation.")
+                            created_vars.pop(var, None)
+
+            # Recurse into blocks
+            if hasattr(child, 'body') and isinstance(child.body, list):
+                self._find_seams(child.body)
+            if hasattr(child, 'handlers') and isinstance(child.handlers, list):
+                for handler in child.handlers:
+                    self._find_seams(handler.body)
+            if hasattr(child, 'orelse') and isinstance(child.orelse, list):
+                self._find_seams(child.orelse)
+
+    def visit_FunctionDef(self, node):
+        self.lines = getattr(node, 'end_lineno', node.lineno) - node.lineno
+        self._find_seams(node.body)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                self.mutations.add(f"{target.value.id}[...]")
+        self.generic_visit(node)
+
+    def visit_Global(self, node):
+        for name in node.names:
+            self.globals.add(name)
+        self.generic_visit(node)
+
+    def visit_Nonlocal(self, node):
+        for name in node.names:
+            self.nonlocals.add(name)
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        io_funcs = {'print', 'open', 'input'}
+        mutating_methods = {'append', 'extend', 'update', 'pop', 'remove', 'clear'}
+        
+        if isinstance(node.func, ast.Name) and node.func.id in io_funcs:
+            self.io_calls.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            if node.func.attr in {'write', 'read', 'exit'}:
+                self.io_calls.add(node.func.attr)
+            elif node.func.attr in mutating_methods and isinstance(node.func.value, ast.Name):
+                self.mutations.add(f"{node.func.value.id}.{node.func.attr}()")
+                
+        self.generic_visit(node)
+
+    def visit_Return(self, node):
+        if node.value is not None:
+            self.has_return = True
+        self.generic_visit(node)
+
+    def _track_depth(self, node):
+        self.current_depth += 1
+        self.max_depth = max(self.max_depth, self.current_depth)
+        self.generic_visit(node)
+        self.current_depth -= 1
+
+    def visit_If(self, node): self._track_depth(node)
+    def visit_For(self, node): self._track_depth(node)
+    def visit_While(self, node): self._track_depth(node)
+
+    def generate_report(self, func_name):
+        score = 100
+        issues = []
+        
+        has_return = "Pass" if self.has_return else "Fail (Mutates state or returns None)"
+        if not self.has_return:
+            score -= 40
+            issues.append("- Lacks explicit return (violates Data In/Out).")
+            
+        global_state = "Pass"
+        if self.globals or self.nonlocals:
+            global_state = "Fail"
+            score -= 30
+            issues.append(f"- Modifies outside state (Globals: {self.globals}, Nonlocals: {self.nonlocals}).")
+
+        mutation_state = "Pass"
+        if self.mutations:
+            mutation_state = f"Fail (Variables: {', '.join(list(self.mutations)[:5])})"
+            score -= 30
+            issues.append(f"- Modifies data structures in-place ({', '.join(list(self.mutations)[:5])}). Use pure transformations.")
+            
+        nesting = "Pass"
+        if self.max_depth > 3:
+            nesting = f"Warn (Depth: {self.max_depth})"
+            score -= (self.max_depth - 3) * 10
+            issues.append(f"- Complex nesting (Depth {self.max_depth}). Hard to intercept cleanly.")
+            
+        io_state = "Pass"
+        if self.io_calls:
+            io_state = f"Warn (Calls: {self.io_calls})"
+            score -= 20
+            issues.append(f"- Contains direct I/O ({self.io_calls}) inside transformation logic.")
+
+        suitability = "HIGH"
+        if score < 70: suitability = "MEDIUM"
+        if score < 40: suitability = "LOW"
+
+        report = f"Function: {func_name}\n"
+        report += f"- Pure Data Flow (Returns value): [{has_return}]\n"
+        report += f"- Global State Mutation: [{global_state}]\n"
+        report += f"- In-Place Mutations: [{mutation_state}]\n"
+        report += f"- Deep Nesting (Complexity): [{nesting}]\n"
+        report += f"- Heavy I/O Detected: [{io_state}]\n\n"
+        
+        if self.seams:
+            report += f"Potential Hooks (Seams):\n"
+            for seam in self.seams[:3]:
+                report += f"  - {seam}\n"
+            report += "\n"
+
+        report += f"Suitability for Approach A (Policy Injection): [{suitability}]\n"
+        
+        if suitability != "HIGH":
+            report += f"\nRecommendation: LOW suitability for direct policy injection. Refactor into Combinators first.\n"
+            if issues:
+                report += "\n".join(issues) + "\n"
+                
+        return report
+
+class PipelineSurgeon:
+    """Utility to surgically modify functional pipelines in source code."""
+    @staticmethod
+    def inject_combinator(file_path: Path, target_func: str, combinator_snippet: str):
+        with open(file_path, 'r') as f: lines = f.readlines()
+        in_func, injected, new_lines = False, False, []
+        for line in lines:
+            if line.startswith(f"def {target_func}("): in_func = True
+            if in_func and not injected and ("Pipeline([" in line or "Stream(" in line):
+                if "Pipeline([" in line:
+                    if "])" in line: line = line.replace("])", f", {combinator_snippet}])"); injected = True
+                    else: line = line.rstrip() + f" {combinator_snippet},\n"; injected = True
+            new_lines.append(line)
+            if in_func and line.startswith("def ") and not line.startswith(f"def {target_func}("): in_func = False
+        if injected:
+            with open(file_path, 'w') as f: f.writelines(new_lines)
+            return True
+        return False
+
+def run_snapshot_verb(args):
+    """Implementation of 'dcomp plugin snapshot'."""
+    run_verify_verb(MockArgs(save=args.output, snapshot=None, scan_files=args.scan_files))
+
 # ==========================================
 # PLUGIN NOUN IMPLEMENTATION
 # ==========================================
@@ -91,6 +278,12 @@ def register_cli(subparsers):
     p_analyze.add_argument("target", help="File or directory to analyze.")
     p_analyze.set_defaults(func=run_analyze_verb)
 
+    # Verb: analyze-fp
+    p_analyze_fp = plugin_sub.add_parser("analyze-fp", help="Analyze function suitability for Approach A (Progressive FP Injection).")
+    p_analyze_fp.add_argument("target", help="File to analyze.")
+    p_analyze_fp.add_argument("--function", help="Specific function to analyze.")
+    p_analyze_fp.set_defaults(func=run_analyze_fp_verb)
+
     # Verb: plan
     p_plan = plugin_sub.add_parser("plan", help="Design an implementation blueprint for a new feature.")
     p_plan.add_argument("noun", help="The noun to extend.")
@@ -103,6 +296,7 @@ def register_cli(subparsers):
     # Verb: execute
     p_execute = plugin_sub.add_parser("execute", help="Automate implementation from a plan file.")
     p_execute.add_argument("plan_file", help="Path to the Markdown plan file.")
+    p_execute.add_argument("--no-verify", action='store_true', help="Skip automated snapshot/verification loop.")
     p_execute.set_defaults(func=run_execute_verb)
 
     # Verb: verify
@@ -111,6 +305,12 @@ def register_cli(subparsers):
     p_verify.add_argument("--save", help="Save the current system state to a snapshot file.")
     p_verify.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
     p_verify.set_defaults(func=run_verify_verb)
+
+    # Verb: snapshot
+    p_snapshot = plugin_sub.add_parser("snapshot", help="Take a behavioral snapshot of the system state.")
+    p_snapshot.add_argument("output", help="Path to save the JSON snapshot.")
+    p_snapshot.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
+    p_snapshot.set_defaults(func=run_snapshot_verb)
 
 def get_noun_file_path(noun_name: str) -> Path:
     # Target application's noun directory
@@ -210,6 +410,34 @@ def run_add_verb_verb(args):
     with open(file_path, 'w') as f: f.write("\n".join(lines) + handler_injection)
     print(f"Added verb '{verb_name}' to noun '{noun_name}'.")
 
+def run_analyze_fp_verb(args):
+    import ast
+    target = Path(args.target)
+    if not target.exists() or not target.is_file():
+        print(f"Error: Target '{target}' is not a valid file.", file=sys.stderr)
+        return
+        
+    try:
+        with open(target, 'r', encoding='utf-8') as f:
+            tree = ast.parse(f.read())
+    except Exception as e:
+        print(f"Error parsing file: {e}", file=sys.stderr)
+        return
+        
+    functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+    
+    if args.function:
+        functions = [f for f in functions if f.name == args.function]
+        if not functions:
+            print(f"Error: Function '{args.function}' not found in {target.name}.", file=sys.stderr)
+            return
+
+    print(f"--- FP Suitability Analysis: {target.name} ---")
+    for func in functions:
+        analyzer = FPAnalyzer()
+        analyzer.visit(func)
+        print(analyzer.generate_report(func.name))
+
 def run_analyze_verb(args):
     import ast
     target = Path(args.target)
@@ -261,10 +489,14 @@ def run_plan_verb(args):
             pdm_data = SimpleYAML.parse(content)
             if pdm_data:
                 pdm_context = f"\nDerived from PDM analysis of: {pdm_data.get('refactor_target')}\n"
+                target_func = pdm_data.get('refactor_target', 'UNKNOWN')
                 for phase in pdm_data.get('phases', []):
                     for op in phase.get('operations', []):
                         if op.get('directive') == 'MOVE':
                             semantic_tasks.append(f"- [ ] semantic:refactor-move {op['entity']} to {op.get('target_noun', noun)}")
+                
+                if target_func != 'UNKNOWN':
+                    semantic_tasks.append(f"- [ ] semantic:rewire-pipeline {target_func}")
     
     plans_dir = Path("plans")
     plans_dir.mkdir(exist_ok=True)
@@ -292,9 +524,18 @@ def run_execute_verb(args):
     if not plan_path.exists():
         print(f"Error: Plan file '{plan_path}' not found.", file=sys.stderr); return
     print(f"--- Executing Plan: {plan_path.name} ---")
+    
+
+    # 1. Automated Snapshot
+    baseline = None
+    if not getattr(args, 'no_verify', False):
+        baseline = "plans/baseline_snapshot.json"
+        Path("plans").mkdir(exist_ok=True)
+        print(f"Taking behavioral snapshot to {baseline}...")
+        run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
+
     with open(plan_path, 'r') as f: lines = f.readlines()
-    class MockArgs:
-        def __init__(self, **kwargs): self.__dict__.update(kwargs)
+    
     for line in lines:
         if line.strip().startswith("- [ ] "):
             task = line.strip()[6:].strip()
@@ -304,8 +545,19 @@ def run_execute_verb(args):
             elif task.startswith("structural:add-verb"):
                 parts = task.split()
                 run_add_verb_verb(MockArgs(noun=parts[-2], verb_name=parts[-1]))
+            elif task.startswith("semantic:rewire-pipeline"):
+                func_name = task.split()[-1]
+                print(f"  [Surgery] Attempting to rewire pipeline in {func_name}...")
+                # Automatic injection of a Log combinator as a safety proof
+                PipelineSurgeon.inject_combinator(Path("scanner/modes.py"), func_name, "Log('Injected Rewire Hook')")
             elif task.startswith("semantic:"): print(f"  [Manual] {task}")
             elif task.startswith("validation:"): print(f"  [Manual] {task}")
+            
+    # 2. Automated Verification
+    if baseline:
+        print("\n--- Verifying Rewired Behavior ---")
+        run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
+        
     print(f"--- Execution Complete ---")
 
 def run_verify_verb(args):
