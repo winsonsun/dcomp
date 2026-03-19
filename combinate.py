@@ -25,49 +25,28 @@ INTERNAL_NOUNS = {'plugin', 'files', 'scenes', 'jobs', 'paths', 'fs', '__init__'
 class MockArgs:
     def __init__(self, **kwargs): self.__dict__.update(kwargs)
 
-class SimpleYAML:
+class SimpleJSONL:
     @staticmethod
     def parse(content):
-        # Extremely basic parser for the PDM 'structural' facet format
+        # Parses the JSONL block from the PDM 'structural' facet
         import re
-        data = {}
-        # Find the YAML block
-        match = re.search(r'```yaml\n(.*?)\n```', content, re.DOTALL)
-        if not match: return None
-        yaml_str = match.group(1)
+        import json
         
-        # Parse top-level keys
-        target_match = re.search(r'refactor_target:\s*"(.*?)"', yaml_str)
-        if target_match: data['refactor_target'] = target_match.group(1)
+        # Find the JSONL block
+        match = re.search(r'```jsonl\n(.*?)\n```', content, re.DOTALL)
+        if not match: return []
+        jsonl_str = match.group(1)
         
-        # Parse phases (very naive list parsing)
-        phases = []
-        phase_blocks = re.findall(r'-\s*id:.*?(?=\n\s*- id:|\Z)', yaml_str, re.DOTALL)
-        for pb in phase_blocks:
-            p = {}
-            id_m = re.search(r'id:\s*(\d+)', pb)
-            name_m = re.search(r'name:\s*"(.*?)"', pb)
-            if id_m: p['id'] = int(id_m.group(1))
-            if name_m: p['name'] = name_m.group(1)
-            
-            # Parse operations
-            ops = []
-            op_lines = re.findall(r'-\s*entity:.*?(?=\n\s*- entity:|\Z)', pb, re.DOTALL)
-            for ol in op_lines:
-                o = {}
-                ent_m = re.search(r'entity:\s*"(.*?)"', ol)
-                type_m = re.search(r'op:\s*"(.*?)"', ol)
-                dir_m = re.search(r'directive:\s*"(.*?)"', ol)
-                tgt_m = re.search(r'target_noun:\s*"(.*?)"', ol)
-                if ent_m: o['entity'] = ent_m.group(1)
-                if type_m: o['op'] = type_m.group(1)
-                if dir_m: o['directive'] = dir_m.group(1)
-                if tgt_m: o['target_noun'] = tgt_m.group(1)
-                ops.append(o)
-            p['operations'] = ops
-            phases.append(p)
-        data['phases'] = phases
-        return data
+        directives = []
+        for line in jsonl_str.split('\n'):
+            line = line.strip()
+            if not line: continue
+            try:
+                directives.append(json.loads(line))
+            except Exception as e:
+                print(f"Warning: Failed to parse JSONL line: {line}\nError: {e}", file=sys.stderr)
+                
+        return directives
 
 import ast
 
@@ -231,23 +210,32 @@ class FPAnalyzer(ast.NodeVisitor):
         return report
 
 class PipelineSurgeon:
-    """Utility to surgically modify functional pipelines in source code."""
+    """Utility to surgically modify code in source files using string anchors."""
     @staticmethod
-    def inject_combinator(file_path: Path, target_func: str, combinator_snippet: str):
-        with open(file_path, 'r') as f: lines = f.readlines()
-        in_func, injected, new_lines = False, False, []
-        for line in lines:
-            if line.startswith(f"def {target_func}("): in_func = True
-            if in_func and not injected and ("Pipeline([" in line or "Stream(" in line):
-                if "Pipeline([" in line:
-                    if "])" in line: line = line.replace("])", f", {combinator_snippet}])"); injected = True
-                    else: line = line.rstrip() + f" {combinator_snippet},\n"; injected = True
-            new_lines.append(line)
-            if in_func and line.startswith("def ") and not line.startswith(f"def {target_func}("): in_func = False
-        if injected:
-            with open(file_path, 'w') as f: f.writelines(new_lines)
-            return True
-        return False
+    def inject_code(file_path: Path, anchor_text: str, position: str, content: str):
+        if not file_path.exists():
+            print(f"Error: Target file '{file_path}' not found.", file=sys.stderr)
+            return False
+            
+        with open(file_path, 'r') as f: content_str = f.read()
+        
+        idx = content_str.find(anchor_text)
+        if idx == -1:
+            print(f"Error: Anchor text '{anchor_text[:30]}...' not found in {file_path}.", file=sys.stderr)
+            return False
+            
+        if position == 'replace':
+            new_content = content_str[:idx] + content + content_str[idx + len(anchor_text):]
+        elif position == 'before':
+            new_content = content_str[:idx] + content + "\n" + content_str[idx:]
+        elif position == 'after':
+            new_content = content_str[:idx + len(anchor_text)] + "\n" + content + content_str[idx + len(anchor_text):]
+        else:
+            print(f"Error: Invalid position '{position}'.", file=sys.stderr)
+            return False
+            
+        with open(file_path, 'w') as f: f.write(new_content)
+        return True
 
 def run_snapshot_verb(args):
     """Implementation of 'dcomp plugin snapshot'."""
@@ -480,24 +468,36 @@ def run_plan_verb(args):
     noun, verb, desc = args.noun.lower(), args.verb_name.lower().replace('-', '_'), args.desc
     
     pdm_context = ""
-    semantic_tasks = ["- [ ] semantic:implement-logic"]
+    semantic_tasks = []
     
     if args.pdm:
         pdm_path = Path(args.pdm)
         if pdm_path.exists():
             with open(pdm_path, 'r') as f: content = f.read()
-            pdm_data = SimpleYAML.parse(content)
-            if pdm_data:
-                pdm_context = f"\nDerived from PDM analysis of: {pdm_data.get('refactor_target')}\n"
-                target_func = pdm_data.get('refactor_target', 'UNKNOWN')
-                for phase in pdm_data.get('phases', []):
-                    for op in phase.get('operations', []):
-                        if op.get('directive') == 'MOVE':
-                            semantic_tasks.append(f"- [ ] semantic:refactor-move {op['entity']} to {op.get('target_noun', noun)}")
+            directives = SimpleJSONL.parse(content)
+            if directives:
+                pdm_context = f"\nDerived from PDM Structural Analysis ({pdm_path.name})\n"
+                for d in directives:
+                    op = d.get('op')
+                    if op == 'scaffold_noun':
+                        semantic_tasks.append(f"- [ ] structural:add-noun {d.get('target', 'UNKNOWN')}")
+                    elif op == 'scaffold_verb':
+                        semantic_tasks.append(f"- [ ] structural:add-verb {d.get('noun', 'UNKNOWN')} {d.get('verb', 'UNKNOWN')}")
+                    elif op == 'inject_code':
+                        semantic_tasks.append(f"- [ ] semantic:inject-code {d.get('file')} | anchor: '{d.get('anchor_text')[:30]}...'")
+                    elif op == 'snapshot':
+                        semantic_tasks.append(f"- [ ] validation:snapshot {d.get('label')}")
+                    elif op == 'verify':
+                        semantic_tasks.append(f"- [ ] validation:verify {d.get('against')}")
                 
-                if target_func != 'UNKNOWN':
-                    semantic_tasks.append(f"- [ ] semantic:rewire-pipeline {target_func}")
-    
+    if not semantic_tasks:
+        semantic_tasks = [
+            f"- [ ] structural:add-noun {noun}",
+            f"- [ ] structural:add-verb {noun} {verb}",
+            "- [ ] semantic:implement-logic",
+            "- [ ] validation:add-test"
+        ]
+        
     plans_dir = Path("plans")
     plans_dir.mkdir(exist_ok=True)
     plan_file = plans_dir / f"plugin_{noun}_{verb}.md"
@@ -511,10 +511,7 @@ def run_plan_verb(args):
         {desc}
         {pdm_context}
         ## Task List
-        - [ ] structural:add-noun {noun}
-        - [ ] structural:add-verb {noun} {verb}
 {task_list_str}
-        - [ ] validation:add-test
     """)
     with open(plan_file, 'w') as f: f.write(template)
     print(f"Generated plan at {plan_file}")
@@ -525,38 +522,46 @@ def run_execute_verb(args):
         print(f"Error: Plan file '{plan_path}' not found.", file=sys.stderr); return
     print(f"--- Executing Plan: {plan_path.name} ---")
     
+    # 1. Parse the PDM JSONL directly
+    with open(plan_path, 'r') as f: content = f.read()
+    directives = SimpleJSONL.parse(content)
+    if not directives:
+        print("Error: No valid JSONL PDM directives found in plan.", file=sys.stderr)
+        return
 
-    # 1. Automated Snapshot
+    # 2. Automated Snapshot
     baseline = None
     if not getattr(args, 'no_verify', False):
-        baseline = "plans/baseline_snapshot.json"
-        Path("plans").mkdir(exist_ok=True)
-        print(f"Taking behavioral snapshot to {baseline}...")
-        run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
+        for d in directives:
+            if d.get('op') == 'snapshot':
+                baseline = f"plans/{d.get('label', 'baseline_snapshot')}.json"
+                Path("plans").mkdir(exist_ok=True)
+                print(f"Taking behavioral snapshot to {baseline}...")
+                run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
+                break
 
-    with open(plan_path, 'r') as f: lines = f.readlines()
-    
-    for line in lines:
-        if line.strip().startswith("- [ ] "):
-            task = line.strip()[6:].strip()
-            print(f"Processing task: {task}...")
-            if task.startswith("structural:add-noun"):
-                run_add_noun_verb(MockArgs(name=task.split()[-1]))
-            elif task.startswith("structural:add-verb"):
-                parts = task.split()
-                run_add_verb_verb(MockArgs(noun=parts[-2], verb_name=parts[-1]))
-            elif task.startswith("semantic:rewire-pipeline"):
-                func_name = task.split()[-1]
-                print(f"  [Surgery] Attempting to rewire pipeline in {func_name}...")
-                # Automatic injection of a Log combinator as a safety proof
-                PipelineSurgeon.inject_combinator(Path("scanner/modes.py"), func_name, "Log('Injected Rewire Hook')")
-            elif task.startswith("semantic:"): print(f"  [Manual] {task}")
-            elif task.startswith("validation:"): print(f"  [Manual] {task}")
+    # 3. Execution Loop
+    for d in directives:
+        op = d.get('op')
+        print(f"Processing operation: {op}...")
+        if op == 'scaffold_noun':
+            run_add_noun_verb(MockArgs(name=d.get('target')))
+        elif op == 'scaffold_verb':
+            run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
+        elif op == 'inject_code':
+            print(f"  [Surgery] Injecting code into {d.get('file')} at anchor '{d.get('anchor_text')[:30]}...'")
+            success = PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), d.get('content'))
+            if not success:
+                print("  [Surgery] FAILED. Halting execution.")
+                return
             
-    # 2. Automated Verification
+    # 4. Automated Verification
     if baseline:
-        print("\n--- Verifying Rewired Behavior ---")
-        run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
+        for d in directives:
+            if d.get('op') == 'verify':
+                print(f"\n--- Verifying Rewired Behavior (against {d.get('against')}) ---")
+                run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
+                break
         
     print(f"--- Execution Complete ---")
 

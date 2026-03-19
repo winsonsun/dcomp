@@ -4,15 +4,36 @@
 *   **Focus:** Strict data lineage, pure functions, and tracking historical state transitions.
 *   **Use Case:** Debugging state-related bugs, designing functional or event-sourced architectures, tracking data lineage for auditing.
 
-**DSL Elements (Entity Versioning & Directional Dependency):**
-These elements replace or modify the standard rows and cell operations to explicitly track how a single entity evolves over time without destructive overwriting.
+**DSL Elements (Lifecycle Prefixes & Logic as Data):**
+This facet emphasizes pure data flow over imperative control flows (like callbacks or execution pointers). 
 
-*   **Versioning (Row Splitting):** Split a single entity row into multiple rows to represent distinct, immutable versions of that data structure as it progresses through the pipeline.
-    *   *Example:* Instead of a single `Raw Catalog` row, use `Raw Catalog (v1 - Persisted)` and `Raw Catalog (v2 - Pruned)`.
-*   **Directional Dependency:** Append modifiers to the operations within cells to clearly indicate if the entity is acting as a source or destination for that operation.
-    *   `(`**`src`**`)`: The immutable source data read by an operation.
-    *   `(`**`dst`**`)`: The newly generated immutable destination resulting from an operation.
-*   **Functional Operators (YRF):** These replace the generic `[T] Transform` to be mathematically precise about the mutation.
-    *   `[Y]` **Yield:** Explicitly denotes generating a brand new, immutable data structure derived from prior inputs.
-    *   `[R]` **Reduce:** Aggregating, folding, or summarizing a dataset into a smaller, synthesized form (e.g., tallying total bytes).
-    *   `[F]` **Filter:** Processing an existing dataset into a smaller, immutable subset by removing items that do not meet a predicate (e.g., pruning missing files).
+### 1. Dynamic Lifecycle Prefixes
+Instead of overwriting rows or using imperative `(src)/(dst)` tags, explicitly track the lifecycle of data by separating it into distinct Rows representing its immutable state progression. These prefixes are dynamically learned/inferred from the program's domain language.
+
+*   **Examples of Lifecycle Prefixes:**
+    *   `Raw_` (Unvalidated input, e.g., `Raw_JSON_Payload`)
+    *   `Valid_` (Parsed and checked, e.g., `Valid_Config`)
+    *   `Diff_` (The delta between two states, e.g., `Diff_Scene_Changes`)
+    *   `Result_` (Final computational output, e.g., `Result_Success_Log`)
+
+**Example: Immutable State Progression**
+| Entity (Row Head) | 1. Ingest | 2. Validate | 3. Compute |
+| :--- | :--- | :--- | :--- |
+| **`Raw_Payload`** | `[I:(Network Read)]` | `[U:(Check schema)]` | |
+| **`Valid_Payload`** | | `[C:(Materialize safe copy)]` | `[U:(Extract values)]`|
+| **`Result_Data`** | | | `[C:(Generate final output)]` |
+
+### 2. `<Ctrl>` Modifier (The Interpreter Pattern)
+Instead of modeling Callbacks or IO Monads as execution steps, treat "Logic" as deferred data. Wrap the Noun in the `<Ctrl>` modifier to explicitly denote that it contains an execution plan, manifest, or side-effect intent.
+
+*   **Phase A (Pure Computation):** The system generates the `<Ctrl>` Manifest using standard pure logic `[C]`.
+*   **Phase B (The Impure Edge):** The system reads the Manifest `[U]` and executes it against the physical world `[E]`.
+
+**Example: Deferring IO (IO Monad)**
+| Entity (Row Head) | 1. Business Logic (Pure) | 2. Boundary (Impure Edge) |
+| :--- | :--- | :--- |
+| **`<Mem> Scene_Nodes`** | `[U:(Analyze hierarchy)]` | |
+| **`<Ctrl> IO_Manifest`** | `[C:(Generate deletion plan)]` | `[U:(Route to executor)]` |
+| **`Physical_FS`** | | `[E:(Delete files)]` |
+
+*Explanation:* We never map a callback or function pointer. We map the generation of a data-manifest that is interpreted later.
