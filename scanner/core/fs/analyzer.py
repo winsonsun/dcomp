@@ -1,41 +1,13 @@
-"""
-This module contains the core implementation for each of the scanner's
-modes of operation (scan, scene, etc.).
-"""
-import json
-import logging
-from pathlib import Path
-from scanner.io import atomic_write_json
-from scanner.store import canonicalize_master_data
-# Import other necessary helpers from dcomp.py as they are modularized
-
-# NOTE: For this refactor, we will copy the entire function bodies from
-# dcomp.py into this file. The original dcomp.py will be updated to
-# import and call these functions.
-
-# Placeholder for functions to be moved from dcomp.py
-
-import json
+import os
 import logging
 import copy
 from pathlib import Path
-from scanner.context import ScanContext
-
-# To avoid circular dependency, dcomp.py must not import from this file.
-# Instead, we may need to pass functions or data from dcomp.py to these modes.
-# For now, we will duplicate some helper function calls and assume they will
-# be moved to more appropriate modules later.
-
-
-
-# --- Mode Implementations ---
 
 def run_scan_mode(args):
     """
     Mode: SCAN
     Ingests physical directory data into the pure JSON architecture using Combinator Pipelines.
     """
-    import os
     from scanner import load_jobs_file, load_and_merge_scans, save_scan_data, save_jobs_config, ensure_path_mappings, get_or_create_path_token
     from scanner.combinators import Pipeline, FS_Scan, Map, BuildTree, Rule, Filter
     from scanner.io import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
@@ -220,58 +192,3 @@ def run_scan_mode(args):
     except Exception as e:
         logging.exception("Failed to export or save media maps: %s", e)
     logging.info("\n--- SCAN mode complete ---")
-
-
-def run_scene_mode(args):
-    from scanner import load_and_merge_scans, save_scan_data
-    from scanner.scene import analyze_scenes
-
-    logging.info("--- Running in SCENE mode ---")
-    context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
-
-    scene_owner_names = set()
-    if args.scene_owner:
-        try:
-            with open(args.scene_owner, 'r', encoding='utf-8') as f:
-                names = json.load(f)
-                if isinstance(names, list):
-                    scene_owner_names = {name.upper() for name in names}
-                    logging.info("Loaded %d scene owner names from '%s'.", len(scene_owner_names), args.scene_owner)
-                else:
-                    logging.warning("Scene owner file '%s' should contain a JSON list of strings.", args.scene_owner)
-        except Exception as e:
-            logging.warning("Could not load scene owner file '%s': %s", args.scene_owner, e)
-
-    # analyze_scenes currently expects and returns raw dicts, we'll convert for now
-    master_dict = context.to_dict()
-    master_dict, data_was_modified, unfound = analyze_scenes(
-        master_dict,
-        scene_owner_names=scene_owner_names,
-        limit=getattr(args, 'scene_size_limit', 0),
-        write_unfound=bool(getattr(args, 'unfound_videos', None)),
-        debug=getattr(args, 'debug_scene', False),
-        override_owner=getattr(args, 'override_owner', False)
-    )
-    context = ScanContext.from_dict(master_dict)
-    
-    if getattr(args, 'unfound_videos', None) and isinstance(args.unfound_videos, str):
-        try:
-            atomic_write_json(args.unfound_videos, unfound, indent=2)
-            logging.info("Wrote unfound videos to '%s'", args.unfound_videos)
-        except Exception:
-            logging.exception("Failed to write unfound videos to '%s'", args.unfound_videos)
-
-    if getattr(args, 'scene_list_file', None):
-        try:
-            scenes_list = sorted(list(context.scenes.keys()))
-            try:
-                atomic_write_json(args.scene_list_file, scenes_list, indent=2)
-                logging.info("Wrote scene list to '%s'", args.scene_list_file)
-            except Exception:
-                logging.exception("Failed to write scene list to '%s'", args.scene_list_file)
-        except Exception as e:
-            logging.exception("Failed to prepare scene list: %s", e)
-
-    save_scan_data(args.scan_files, context, data_was_modified, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
-    logging.info("--- SCENE mode complete ---")
-

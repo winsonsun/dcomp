@@ -2,12 +2,12 @@ import json
 import re
 import sys
 from scanner.combinators import Pipeline, Load, Filter, Rule, UnrollTree
-from scanner.nouns import Noun
+from scanner.entities import Noun
 from typing import Any, Dict, List
 
 def register_cli(subparsers):
     """Registers the 'jobs' noun and its verbs."""
-    p_job = subparsers.add_parser("jobs", help="Manage and query jobs.")
+    p_job = subparsers.add_parser("job", help="Manage and query jobs.")
     job_sub = p_job.add_subparsers(dest="verb", required=True, help="Job verbs")
 
     # Verb: list (formerly part of query or job --lsdir)

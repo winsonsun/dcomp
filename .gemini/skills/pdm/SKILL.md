@@ -21,6 +21,7 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
     *   **Automatic Workflow Discovery (The Engine):** You must dynamically discover the workflow phases (columns) and data entities (rows) by analyzing the code's entry points, CLI arguments, or comprehensive test cases. DO NOT force a discovered workflow into a rigid `[W-Cfg][W-Rev][W-App]` template if the actual process is more complex (e.g., a 5-step distributed sync).
     *   **Columns:** Represent chronological Application Phases (e.g., Init Jobs, Dual-Scan, Diff & Manifest, Execute Sync).
     *   **Rows:** Represent immutable Data Entities (e.g., Physical Files, JSON caches, Action Manifests).
+        *   **Ecosystem Bindings (Namespace Tags):** To explicitly differentiate generic concepts (e.g., a cache) from ecosystem-bound domain nouns, append the exact namespace using `::` syntax if it corresponds to an actual system component (e.g., `<Mem> SceneList::domain.scenes` vs a generic `<Mem> Temp_Cache`).
         *   **System Library Modifiers (The Physics):** Instead of using imperative execution instructions, represent the computational context wrapping the data using these universal modifiers on the Row Head, similar to Type Generics (e.g., `<Fut, Sync> DB_Ledger`). Modifiers MUST only appear on the Row Head, never inside operations/cells.
             *   `<Mem>`: Pure Value (Default in-memory data, assumed if omitted).
             *   `<Fut>`: Temporal/Async (Data that will resolve later; Promises, Tasks).
@@ -29,6 +30,7 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
             *   `<Msg>`: In-Transit (Data crossing a boundary; Streams, Actor Envelopes).
     *   **Cells:** Represent the operations performed on the entity during that phase.
         *   **Format:** `[OP:Reference (Business Purpose)]`. 
+        *   **Ecosystem Bindings (Verbs):** If the operation utilizes a specific, dynamically discovered ecosystem verb, embed the binding in the Business Purpose using `@` notation (e.g., `[M:(@domain.scenes.update_owner)]` instead of a generic `[M:(Update owner field)]`).
         *   **Constraint (Multi-Directional Traversal Linkage):** You MUST explicitly forbid repeating the Row Entity name in the `Reference`. The `Reference` MUST be a *sub-component*, *child property*, or *related dependency* of the Row Entity. The `Business Purpose` MUST explicitly tie the data operation back to the macro workflow defined in Layer 1 (e.g., `(Identify Large Scenes for Sync)` instead of just `(Check Size)`). This ensures the view remains language-agnostic and anchored to the business process regardless of depth.
         *   *Examples:* `[I:job_specs (Load Tasks)]`, `[U:db_items (Identify Large Scenes)]`, `[M:scene_owner (Assign from Rules)]`.
 2. **Guided Mode (Interactive Prompts):** If the user's request is vague or lacks clear intent ("intelli-sense" failure), do not guess. Use the `ask_user` tool to present options.
@@ -44,6 +46,7 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
 3. **Never leave cells blank ambiguously.** If no operation occurs, leave it empty `| |`, but if an entity is structurally required for a phase, ensure the `[I]` or `[U]` is present.
 4. **Always explain the Composition.** Before printing the Markdown table, explicitly state which "Facets" (Petals) you have composed for this specific matrix based on the question.
 5. **Auto-Summarization (The 'So What?'):** After generating any matrix, provide a concise 2-3 bullet point summary highlighting the architectural bottlenecks, risks, or insights revealed by the diagram.
+    *   **Emergent Concept Materialization:** Proactively identify recurring implicit data structures or ad-hoc transformations that lack a formal ecosystem binding (`::` or `@`). Recommend scaffolding these into formal, reusable Nouns (e.g., `domain.new_noun`) or Verbs (e.g., `ext.lib.new_verb`) using `combinate.py` so they can be reused across the ecosystem.
 6. **Optional Visualizations:** If the user explicitly requests a flowchart or visual diagram, generate a Mermaid.js diagram (`graph TD` or `sequenceDiagram`) representing the matrix's flow alongside the Markdown table. Do not generate Mermaid graphs by default unless requested.
 
 ## Vantage & Anchoring
@@ -111,6 +114,17 @@ There are two parts in this output: (1) Layer Index, with all layers short descr
 Style Layer 1 and Layer n-1 as static "frozen" headers or referenced tables above the active Layer n matrix. Bold macro-entities in the micro-matrix to show they are inherited. Italicize transient entities. Number columns hierarchically.
 
 **Code Grounding Note:** When generating a micro-matrix (Layer 2 or deeper), you MUST include a visible Markdown blockquote below the matrix (e.g., `> **Code Grounding:** file_path: L#`) citing the specific source code files. Do NOT use HTML comments.
+
+## The Agentic Ecosystem (How to Execute)
+Do not attempt to read hundreds of files, render Markdown, and manage the cache manually in a single context. Delegate to the deterministic ecosystem:
+
+1. **Codebase Investigation (The Eyes):** Call the `codebase_investigator` sub-agent to trace code logic and summarize data flow before building a matrix.
+2. **Semantic Zooming (Sub-Agents):** 
+    *   To zoom *in* (Down), delegate to the `pdm_micro_analyzer` sub-agent with the specific target function.
+    *   To change lenses (Switch), delegate to the `pdm_facet_mapper` sub-agent.
+3. **Cache Navigation (The Memory):** To zoom *out* (Up), DO NOT generate a new matrix. Trigger the `scanner/pdm_cache.py` tool to instantly retrieve the parent JSON graph.
+4. **Output Rendering (The Mouth):** Output ONLY the strict "Core IL" JSON matrix. Trigger `scanner/pdm_renderer.py --persona=[programmer|business|architect]` to deterministically translate and print the final Markdown table.
+5. **AST Surgery (The Hands):** For refactoring, output semantic intent directives (where `anchor_text` is the target function name) and pass them to `combinate.py`, which now uses safe AST injection.
 
 ## Caching & The Dive Stack (State Management)
 To rapidly respond to semantic zoom requests and incrementally build a graph database, you MUST maintain a fast, index-based cache in `.gemini/pdm_cache.jsonl`.

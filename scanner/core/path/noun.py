@@ -3,12 +3,12 @@ import os
 import sys
 from pathlib import Path
 from scanner.combinators import Pipeline, Load, Filter, Rule
-from scanner.nouns import Noun
+from scanner.entities import Noun
 from typing import Any, Dict, List
 
 def register_cli(subparsers):
     """Registers the 'paths' noun and its verbs."""
-    p_paths = subparsers.add_parser("paths", help="Manage and query physical paths (tokens).")
+    p_paths = subparsers.add_parser("path", help="Manage and query physical paths (tokens).")
     path_sub = p_paths.add_subparsers(dest="verb", required=True, help="Path verbs")
 
     # Verb: list

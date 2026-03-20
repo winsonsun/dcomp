@@ -4,12 +4,12 @@ import sys
 import logging
 from pathlib import Path
 from scanner.combinators import Pipeline, Load, Filter, Rule
-from scanner.nouns import Noun
+from scanner.entities import Noun
 from typing import Any, Dict, List, Set
 
 def register_cli(subparsers):
     """Registers the 'scenes' noun and its verbs."""
-    p_scenes = subparsers.add_parser("scenes", help="Detect, query, and prune scenes.")
+    p_scenes = subparsers.add_parser("scene", help="Detect, query, and prune scenes.")
     scene_sub = p_scenes.add_subparsers(dest="verb", required=True, help="Scene verbs")
 
     # Verb: detect
@@ -49,8 +49,52 @@ def register_cli(subparsers):
     p_gen.set_defaults(func=run_generate_verb)
 
 def run_detect_verb(args):
-    from scanner.modes import run_scene_mode
-    run_scene_mode(args)
+    """Implementation of 'scanner scene detect'."""
+    from scanner.io import load_and_merge_scans, save_scan_data, atomic_write_json
+    from .analyzer import analyze_scenes
+    
+    print(f"--- Running Scene Detection Mode ---")
+    scan_files = getattr(args, 'scan_files', ["cache.json"])
+    paths_file = getattr(args, 'paths_file', "~/.dcomp/paths.json")
+    meta_file = getattr(args, 'metadata_file', "metadata.json")
+    
+    context = load_and_merge_scans(scan_files, paths_file, meta_file)
+    master_scan_data = context.to_dict()
+
+    scene_owner_names = set()
+    if getattr(args, 'scene_owner', None):
+        try:
+            with open(args.scene_owner, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    scene_owner_names = {name.upper() for name in data}
+        except Exception as e:
+            print(f"Warning: Could not read scene owner file '{args.scene_owner}': {e}", file=sys.stderr)
+
+    master_scan_data, data_was_modified, unfound_videos = analyze_scenes(
+        master_scan_data,
+        scene_owner_names=scene_owner_names,
+        limit=getattr(args, 'scene_size_limit', 0),
+        write_unfound=bool(getattr(args, 'unfound_videos', False)),
+        debug=getattr(args, 'debug_scene', False),
+        override_owner=getattr(args, 'override_owner', False)
+    )
+
+    if getattr(args, 'scene_list_file', None):
+        scenes_found = sorted(list(master_scan_data.get('scenes', {}).keys()))
+        atomic_write_json(args.scene_list_file, scenes_found, indent=2)
+        print(f"Exported {len(scenes_found)} scene names to '{args.scene_list_file}'.")
+
+    if getattr(args, 'unfound_videos', None):
+        atomic_write_json(args.unfound_videos, unfound_videos, indent=2)
+        print(f"Exported {len(unfound_videos)} unfound video IDs to '{args.unfound_videos}'.")
+
+    if data_was_modified:
+        context.scenes = master_scan_data.get('scenes', {})
+        save_scan_data(scan_files, context, True, paths_file, meta_file)
+        print("Updated scene data saved to metadata.")
+    else:
+        print("No scene modifications were necessary.")
 
 def run_query_verb(args):
     pipeline = query_pipeline(args)
@@ -65,8 +109,8 @@ def run_prune_verb(args):
         save_scan_data(args.scan_files, context, True, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
 
 def run_generate_verb(args):
-    """Implementation of 'scanner scenes generate'."""
-    from io_utils import atomic_write_json
+    """Implementation of 'scanner scene generate'."""
+    from scanner.io import atomic_write_json
     print(f"--- Generating Scene Owner List ---")
     source_path = Path(args.path)
     if not source_path.is_dir():

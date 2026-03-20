@@ -5,6 +5,23 @@ import sys
 
 from scanner.context import ScanContext
 
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+@runtime_checkable
+class Noun(Protocol):
+    """
+    Protocol defining the interface for a 'Noun' in the scanner system.
+    Nouns represent domain entities (files, scenes, jobs, etc.) that can be
+    queried, resolved, and pruned.
+    """
+
+    def query_pipeline(self, args: Any) -> Any: ...
+    def format_output(self, matched: Dict[str, Any], args: Any) -> None: ...
+    def resolve_items(self, resolver: Any, args_parts: List[str]) -> Dict[str, Dict[str, Any]]: ...
+    def prune(self, args: Any, master_scan_data: Dict[str, Any]) -> bool: ...
+    def register_cli(self, subparsers: Any) -> None: ...
+    def get_rules(self, phase: str, context: Any) -> List[Any]: ...
+
 class EntityResolver:
     """
     A unified interface to query and resolve entities across the pure JSON data architecture.
@@ -90,17 +107,21 @@ class EntityResolver:
         noun = parts[0].lower()
         
         # Normalize noun names
-        if noun == 'scene': noun = 'scenes'
-        if noun == 'job': noun = 'jobs'
-        if noun == 'path': noun = 'paths'
-        if noun == 'file': noun = 'files'
+        if noun == 'scenes': noun = 'scene'
+        if noun == 'jobs': noun = 'job'
+        if noun == 'paths': noun = 'path'
+        if noun == 'files': noun = 'file'
 
-        module_path = f"scanner.nouns.{noun}"
-        try:
-            noun_module = importlib.import_module(module_path)
-            if hasattr(noun_module, 'resolve_items'):
-                return noun_module.resolve_items(self, parts[1:])
-            else:
-                raise ValueError(f"Noun '{noun}' does not support item resolution.")
-        except ImportError:
-            raise ValueError(f"Unsupported noun type '{noun}' for item resolution (module {module_path} not found).")
+        # Namespace discovery logic
+        for ns in ["scanner.core", "scanner.fileorg", "ext"]:
+            module_path = f"{ns}.{noun}.noun"
+            try:
+                noun_module = importlib.import_module(module_path)
+                if hasattr(noun_module, 'resolve_items'):
+                    return noun_module.resolve_items(self, parts[1:])
+                else:
+                    continue # Try next namespace
+            except ImportError:
+                continue
+                
+        raise ValueError(f"Unsupported noun type '{noun}' or module not found in known namespaces.")

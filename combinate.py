@@ -15,8 +15,8 @@ import os
 import textwrap
 from pathlib import Path
 
-# Core internal nouns that should not be modified or deleted by the plugin system.
-INTERNAL_NOUNS = {'plugin', 'files', 'scenes', 'jobs', 'paths', 'fs', '__init__'}
+# Core protected namespaces that should not be modified by the plugin system.
+PROTECTED_NAMESPACES = {'core'}
 
 # ==========================================
 # UTILITIES
@@ -210,7 +210,7 @@ class FPAnalyzer(ast.NodeVisitor):
         return report
 
 class PipelineSurgeon:
-    """Utility to surgically modify code in source files using string anchors."""
+    """Utility to surgically modify code in source files using AST for precision with string fallback."""
     @staticmethod
     def inject_code(file_path: Path, anchor_text: str, position: str, content: str):
         if not file_path.exists():
@@ -219,9 +219,31 @@ class PipelineSurgeon:
             
         with open(file_path, 'r') as f: content_str = f.read()
         
+        import ast
+        try:
+            tree = ast.parse(content_str)
+            insert_lineno = -1
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == anchor_text:
+                    insert_lineno = node.body[-1].lineno if node.body else node.lineno + 1
+                    break
+                    
+            if insert_lineno != -1:
+                lines = content_str.split('\n')
+                indent = "    " * 2
+                indented_content = "\n".join(indent + line for line in content.split('\n'))
+                if position == 'after': lines.insert(insert_lineno, indented_content)
+                elif position == 'before': lines.insert(insert_lineno - 1, indented_content)
+                elif position == 'replace': lines[insert_lineno - 1] = indented_content
+                with open(file_path, 'w') as f: f.write("\n".join(lines))
+                return True
+        except SyntaxError:
+            pass
+            
+        # Fallback to string matching
         idx = content_str.find(anchor_text)
         if idx == -1:
-            print(f"Error: Anchor text '{anchor_text[:30]}...' not found in {file_path}.", file=sys.stderr)
+            print(f"Error: Anchor text/function '{anchor_text[:30]}...' not found in {file_path}.", file=sys.stderr)
             return False
             
         if position == 'replace':
@@ -250,15 +272,17 @@ def register_cli(subparsers):
     p_plugin = subparsers.add_parser("plugin", help="Developer tools to add new nouns and verbs.")
     plugin_sub = p_plugin.add_subparsers(dest="verb", required=True, help="Plugin verbs")
 
-    # Verb: add-noun
-    p_add_noun = plugin_sub.add_parser("add-noun", help="Scaffold a new noun module.")
-    p_add_noun.add_argument("name", help="Name of the new noun (e.g., tags).")
-    p_add_noun.set_defaults(func=run_add_noun_verb)
+    # Verb: scaffold
+    p_scaffold = plugin_sub.add_parser("scaffold", help="Scaffold a new noun module.")
+    p_scaffold.add_argument("name", help="Namespace and name of the new noun (e.g., domain.tags, ext.aws).")
+    p_scaffold.add_argument("--force", action='store_true', help="Allow scaffolding into protected namespaces.")
+    p_scaffold.set_defaults(func=run_scaffold_verb)
 
     # Verb: add-verb
     p_add_verb = plugin_sub.add_parser("add-verb", help="Add a new verb to an existing noun.")
-    p_add_verb.add_argument("noun", help="Name of the target noun.")
+    p_add_verb.add_argument("noun", help="Namespace and name of the target noun (e.g., domain.tags).")
     p_add_verb.add_argument("verb_name", help="Name of the new verb (e.g., analyze).")
+    p_add_verb.add_argument("--force", action='store_true', help="Allow modifying protected namespaces.")
     p_add_verb.set_defaults(func=run_add_verb_verb)
 
     # Verb: analyze
@@ -300,20 +324,48 @@ def register_cli(subparsers):
     p_snapshot.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
     p_snapshot.set_defaults(func=run_snapshot_verb)
 
-def get_noun_file_path(noun_name: str) -> Path:
-    # Target application's noun directory
-    return Path("scanner/nouns") / f"{noun_name}.py"
+def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
+    parts = full_name.lower().split('.')
+    if len(parts) == 1:
+        namespace, noun_name = 'fileorg', parts[0]
+    else:
+        namespace, noun_name = parts[0], parts[1]
+        
+    if namespace == 'core':
+        base = Path("scanner/core")
+    elif namespace == 'fileorg':
+        base = Path("scanner/fileorg")
+    elif namespace == 'ext':
+        base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
+    else:
+        base = Path("scanner/nouns")
+        
+    folder = base / noun_name
+    return folder / "noun.py", folder / "noun.json", folder
 
-def run_add_noun_verb(args):
-    noun_name = args.name.lower()
-    if noun_name in INTERNAL_NOUNS:
-        print(f"Error: '{noun_name}' is a reserved internal name.", file=sys.stderr)
+def run_scaffold_verb(args):
+    full_name = args.name.lower()
+    parts = full_name.split('.')
+    namespace = parts[0] if len(parts) > 1 else 'fileorg'
+    noun_name = parts[-1]
+    
+    if namespace in PROTECTED_NAMESPACES and not getattr(args, 'force', False):
+        print(f"Error: Cannot scaffold into protected namespace '{namespace}'. Use --force to override.", file=sys.stderr)
         return
-    file_path = get_noun_file_path(noun_name)
-    if file_path.exists():
-        print(f"Error: Noun module '{noun_name}' already exists.", file=sys.stderr)
+        
+    file_path, json_path, folder_path = get_noun_file_path(full_name)
+    if folder_path.exists():
+        print(f"Error: Noun module '{full_name}' already exists.", file=sys.stderr)
         return
 
+    import json
+    # ... (template code) ...
+    folder_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create __init__.py to expose the noun
+    init_path = folder_path / "__init__.py"
+    with open(init_path, 'w') as f:
+        f.write("from .noun import register_cli\n")
     template = textwrap.dedent(f'''\
         import json
         from scanner.combinators import Pipeline, Load, Filter, Rule, Stream
@@ -359,23 +411,43 @@ def run_add_noun_verb(args):
         def get_rules(phase, context):
             return []
     ''')
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     with open(file_path, 'w') as f: f.write(template)
+    
+    json_contract = {
+        "namespace": full_name,
+        "description": "Auto-generated noun semantic contract.",
+        "allowed_modifiers": ["<Mem>"],
+        "inner_data_schema": {
+            "type": "object",
+            "description": "Define the structural requirements for this Noun's internal state here."
+        },
+        "verbs": {}
+    }
+    with open(json_path, 'w') as f: json.dump(json_contract, f, indent=2)
+    
     print(f"Generated noun '{noun_name}' at {file_path}")
+    print(f"Generated semantic contract at {json_path}")
 
 def run_add_verb_verb(args):
-    noun_name, verb_name = args.noun.lower(), args.verb_name.lower().replace('-', '_')
-    if noun_name in INTERNAL_NOUNS:
-        print(f"Error: Cannot modify internal noun '{noun_name}'.", file=sys.stderr)
+    full_name = args.noun.lower()
+    verb_name = args.verb_name.lower().replace('-', '_')
+    parts = full_name.split('.')
+    namespace = parts[0] if len(parts) > 1 else 'fileorg'
+    noun_name = parts[-1]
+    
+    if namespace in PROTECTED_NAMESPACES and not getattr(args, 'force', False):
+        print(f"Error: Cannot modify protected namespace '{namespace}'. Use --force to override.", file=sys.stderr)
         return
-    file_path = get_noun_file_path(noun_name)
+        
+    file_path, json_path = get_noun_file_path(full_name)
     if not file_path.exists():
-        print(f"Error: Noun '{noun_name}' does not exist.", file=sys.stderr)
+        print(f"Error: Noun '{full_name}' does not exist.", file=sys.stderr)
         return
     with open(file_path, 'r') as f: content = f.read()
     if f'def run_{verb_name}_verb' in content:
         print(f"Error: Verb '{verb_name}' already exists.", file=sys.stderr)
         return
+    import json
     lines = content.split('\n')
     insert_idx, in_register_cli, noun_sub_var = -1, False, f"{noun_name}_sub"
     for i, line in enumerate(lines):
@@ -396,7 +468,30 @@ def run_add_verb_verb(args):
         pass
     """)
     with open(file_path, 'w') as f: f.write("\n".join(lines) + handler_injection)
-    print(f"Added verb '{verb_name}' to noun '{noun_name}'.")
+    
+    # Update Semantic JSON Contract
+    if json_path.exists():
+        try:
+            with open(json_path, 'r') as f: contract = json.load(f)
+        except Exception:
+            contract = {"namespace": full_name, "verbs": {}}
+    else:
+        contract = {"namespace": full_name, "verbs": {}}
+        
+    contract.setdefault("verbs", {})[verb_name] = {
+        "type": "Pure Transformation [T]",
+        "input_requirements": {
+            "schema": "#/inner_data_schema",
+            "required_modifiers": ["<Mem>"],
+            "forbidden_prefixes": ["Raw_"]
+        },
+        "output": "<Mem> Unknown",
+        "side_effects": []
+    }
+    with open(json_path, 'w') as f: json.dump(contract, f, indent=2)
+    
+    print(f"Added verb '{verb_name}' to noun '{full_name}'.")
+    print(f"Updated semantic contract at {json_path}")
 
 def run_analyze_fp_verb(args):
     import ast
@@ -480,7 +575,7 @@ def run_plan_verb(args):
                 for d in directives:
                     op = d.get('op')
                     if op == 'scaffold_noun':
-                        semantic_tasks.append(f"- [ ] structural:add-noun {d.get('target', 'UNKNOWN')}")
+                        semantic_tasks.append(f"- [ ] structural:scaffold {d.get('target', 'UNKNOWN')}")
                     elif op == 'scaffold_verb':
                         semantic_tasks.append(f"- [ ] structural:add-verb {d.get('noun', 'UNKNOWN')} {d.get('verb', 'UNKNOWN')}")
                     elif op == 'inject_code':
@@ -492,7 +587,7 @@ def run_plan_verb(args):
                 
     if not semantic_tasks:
         semantic_tasks = [
-            f"- [ ] structural:add-noun {noun}",
+            f"- [ ] structural:scaffold {noun}",
             f"- [ ] structural:add-verb {noun} {verb}",
             "- [ ] semantic:implement-logic",
             "- [ ] validation:add-test"
@@ -545,7 +640,7 @@ def run_execute_verb(args):
         op = d.get('op')
         print(f"Processing operation: {op}...")
         if op == 'scaffold_noun':
-            run_add_noun_verb(MockArgs(name=d.get('target')))
+            run_scaffold_verb(MockArgs(name=d.get('target')))
         elif op == 'scaffold_verb':
             run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
         elif op == 'inject_code':

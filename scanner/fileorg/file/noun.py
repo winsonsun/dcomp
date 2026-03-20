@@ -1,11 +1,11 @@
 import json
 from scanner.combinators import Pipeline, Load, Filter, Rule
-from scanner.nouns import Noun
+from scanner.entities import Noun
 from typing import Any, Dict, List
 
 def register_cli(subparsers):
     """Registers the 'files' noun and its verbs."""
-    p_files = subparsers.add_parser("files", help="Query and prune database files.")
+    p_files = subparsers.add_parser("file", help="Query and prune database files.")
     file_sub = p_files.add_subparsers(dest="verb", required=True, help="File verbs")
 
     # Verb: query

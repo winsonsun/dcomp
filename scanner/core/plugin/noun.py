@@ -69,7 +69,7 @@ def run_add_noun_verb(args):
     template = textwrap.dedent(f'''\
         import json
         from scanner.combinators import Pipeline, Load, Filter, Rule, Stream
-        from scanner.nouns import Noun
+        from scanner.entities import Noun
         from typing import Any, Dict, List
 
         def register_cli(subparsers):
