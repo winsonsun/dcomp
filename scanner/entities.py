@@ -17,7 +17,7 @@ class Noun(Protocol):
 
     def query_pipeline(self, args: Any) -> Any: ...
     def format_output(self, matched: Dict[str, Any], args: Any) -> None: ...
-    def resolve_items(self, resolver: Any, args_parts: List[str]) -> Dict[str, Dict[str, Any]]: ...
+    def resolve_for_diff(self, resolver: Any, args_parts: List[str]) -> Dict[str, Dict[str, Any]]: ...
     def prune(self, args: Any, master_scan_data: Dict[str, Any]) -> bool: ...
     def register_cli(self, subparsers: Any) -> None: ...
     def get_rules(self, phase: str, context: Any) -> List[Any]: ...
@@ -80,7 +80,37 @@ class EntityResolver:
             trees.update(data.get('jobs', {}))
         return trees
 
-    def resolve_items(self, target_uri):
+    def get_noun_module(self, target_uri: str) -> Any:
+        """
+        Dynamically discovers and returns the Noun module associated with a URI.
+        """
+        import importlib
+        if ':' not in target_uri:
+            if os.path.isabs(target_uri) or os.path.exists(target_uri):
+                target_uri = f"fs:{target_uri}"
+            else:
+                raise ValueError(f"Invalid target URI '{target_uri}'. Expected format 'type:name'")
+                
+        parts = target_uri.split(':')
+        noun = parts[0].lower()
+        
+        # Normalize noun names
+        if noun == 'scenes': noun = 'scene'
+        if noun == 'jobs': noun = 'job'
+        if noun == 'paths': noun = 'path'
+        if noun == 'files': noun = 'file'
+
+        for ns in ["scanner.core", "scanner.fileorg", "ext"]:
+            module_path = f"{ns}.{noun}.noun"
+            try:
+                noun_module = importlib.import_module(module_path)
+                return noun_module
+            except ImportError:
+                continue
+                
+        raise ValueError(f"Unsupported noun type '{noun}' or module not found in known namespaces.")
+
+    def resolve_for_diff(self, target_uri):
         """
         Resolves a URI string into a flat dictionary of items for differencing or querying.
         URI Formats:
@@ -113,12 +143,13 @@ class EntityResolver:
         if noun == 'files': noun = 'file'
 
         # Namespace discovery logic
+        from scanner.contracts import Diffable
         for ns in ["scanner.core", "scanner.fileorg", "ext"]:
             module_path = f"{ns}.{noun}.noun"
             try:
                 noun_module = importlib.import_module(module_path)
-                if hasattr(noun_module, 'resolve_items'):
-                    return noun_module.resolve_items(self, parts[1:])
+                if isinstance(noun_module, Diffable):
+                    return noun_module.resolve_for_diff(self, parts[1:])
                 else:
                     continue # Try next namespace
             except ImportError:

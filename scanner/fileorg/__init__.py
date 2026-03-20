@@ -43,3 +43,52 @@ def register_cli(subparsers):
     p_merge.add_argument("--out", required=True, help="The output JSON file path.")
     p_merge.add_argument("--rule", help="Optional JSON file defining conflict resolution policies.")
     p_merge.set_defaults(func=run_merge_mode)
+
+def mount_cli(subparsers):
+    """
+    Fulfills the Cmdcliable trait for the fileorg domain.
+    Reads the domain.json blueprint and delegates the creation of CLI workflows
+    to the core.cliux Noun.
+    """
+    import json
+    from pathlib import Path
+    import sys
+    
+    domain_json_path = Path(__file__).parent / "domain.json"
+    if not domain_json_path.exists():
+        return
+        
+    try:
+        with open(domain_json_path, 'r') as f:
+            blueprint = json.load(f)
+            
+        # Import the AOT compiled workflows
+        try:
+            from . import generated_workflows
+        except ImportError:
+            generated_workflows = None
+
+        workflows = blueprint.get("workflows", {})
+        for name, flow in workflows.items():
+            try:
+                p_flow = subparsers.add_parser(name, help=flow.get("description", "Declarative workflow."))
+                p_flow.add_argument("-j", "--job-file", default="jobs.json")
+                p_flow.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+')
+                p_flow.add_argument("--remote", help="Remote target for comparison/sync flows.")
+                
+                # Link to the AOT compiled function if it exists
+                func_name = f"run_{name.replace('-', '_')}"
+                if generated_workflows and hasattr(generated_workflows, func_name):
+                    p_flow.set_defaults(func=getattr(generated_workflows, func_name))
+                else:
+                    # Fallback for uncompiled workflows
+                    def make_fallback(n):
+                        def fallback(args):
+                            print(f"Error: Workflow '{n}' is not compiled. Run 'combinate plugin compile-workflows fileorg'.")
+                        return fallback
+                    p_flow.set_defaults(func=make_fallback(name))
+            except Exception:
+                continue
+                
+    except Exception as e:
+        print(f"Error in fileorg.mount_cli: {e}", file=sys.stderr)

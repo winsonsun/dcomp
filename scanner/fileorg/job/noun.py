@@ -136,7 +136,7 @@ def format_output(matched, args):
         if getattr(args, 'verbose', False):
             print(json.dumps(j, indent=4))
 
-def resolve_items(resolver, args_parts):
+def resolve_for_diff(resolver, args_parts):
     import sys
     
     if len(args_parts) < 2:
@@ -161,6 +161,18 @@ def resolve_items(resolver, args_parts):
     ])
     
     return pipeline.execute(tree)
+
+def generate_sync_manifest(diff_data):
+    """Fulfills the Syncable Trait."""
+    from scanner.distributed.combinators import SyncManifest
+    from scanner.combinators import Pipeline
+    pipeline = Pipeline([SyncManifest(job_name="job_sync")])
+    return pipeline.execute(diff_data)
+
+def execute_sync_intent(intent):
+    """Fulfills the Syncable Trait."""
+    # Job-specific logic to execute a sync intent
+    return True
 
 def prune(args, master_scan_data):
     """Pruning jobs is not yet implemented."""

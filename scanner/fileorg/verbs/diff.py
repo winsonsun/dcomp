@@ -11,7 +11,7 @@ def run_diff_mode(args):
     from scanner import load_and_merge_scans, load_jobs_file
     from scanner.store import resolve_token_path
     from scanner.reports import generate_diff_report
-    from scanner.modes import reconstruct_items_map
+    from scanner.legacy_utils import reconstruct_items_map
 
     if getattr(args, 'format', 'text') == 'text':
         print(f"--- Running in DIFF mode ---")
@@ -19,7 +19,7 @@ def run_diff_mode(args):
     context = load_and_merge_scans(args.scan_files, getattr(args, 'paths_file', None) or '~/.dcomp/paths.json', getattr(args, 'metadata_file', None) or 'metadata.json')
     db_items = context.items
 
-    def resolve_items_map_paths(items_map_local):
+    def resolve_for_diff_map_paths(items_map_local):
         # We only resolve paths physically if format is text (for human reading).
         # If format is json, we must retain the abstract tokens (PATHxx) for distributed sync!
         if getattr(args, 'format', 'text') == 'json' or getattr(args, 'format', 'text') == 'return_json':
@@ -40,11 +40,11 @@ def run_diff_mode(args):
             context=context
         )
         try:
-            items1_map = resolver.resolve_items(args.left)
-            items2_map = resolver.resolve_items(args.right)
+            items1_map = resolver.resolve_for_diff(args.left)
+            items2_map = resolver.resolve_for_diff(args.right)
             
-            resolve_items_map_paths(items1_map)
-            resolve_items_map_paths(items2_map)
+            resolve_for_diff_map_paths(items1_map)
+            resolve_for_diff_map_paths(items2_map)
             
             return generate_diff_report(args.left, items1_map, args.right, items2_map, mode=args.mode, format=getattr(args, 'format', 'text'))
         except Exception as e:
@@ -87,8 +87,8 @@ def run_diff_mode(args):
                 items1_map = reconstruct_items_map(job_tree_1, db_items)
                 items2_map = reconstruct_items_map(job_tree_2, db_items)
 
-                resolve_items_map_paths(items1_map)
-                resolve_items_map_paths(items2_map)
+                resolve_for_diff_map_paths(items1_map)
+                resolve_for_diff_map_paths(items2_map)
 
                 return generate_diff_report(dir1_path, items1_map, dir2_path, items2_map, mode=args.mode, format=getattr(args, 'format', 'text'))
 

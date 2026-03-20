@@ -70,7 +70,7 @@ def format_output(matched, args):
     if len(matched) > 50:
         print(f"  ... and {len(matched) - 50} more.")
 
-def resolve_items(resolver, args_parts):
+def resolve_for_diff(resolver, args_parts):
     """
     Resolves file references into items.
     URI Format: file:<rel_path> or file:all
@@ -90,6 +90,20 @@ def resolve_items(resolver, args_parts):
         if path.lower() in k.lower() or path.lower() in v.get('base_name', '').lower():
             matched[k] = v
     return matched
+
+def merge_state(local_state: dict, remote_state: dict, policy: dict) -> dict:
+    """Fulfills the Mergeable Trait."""
+    from scanner.distributed.combinators import MergeJSON
+    from scanner.combinators import Rule
+    
+    def policy_resolver(local_val, remote_val, key_path):
+        key = key_path.split('.')[-1]
+        strategy = policy.get(key, "remote_wins")
+        if strategy == "local_wins": return local_val
+        return remote_val
+
+    merger = MergeJSON(remote_state, rule=Rule(policy_resolver))
+    return merger(local_state)
 
 def prune(args, master_scan_data):
     all_referenced_db_keys = set()

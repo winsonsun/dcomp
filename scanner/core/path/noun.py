@@ -149,7 +149,7 @@ def format_output(matched, args):
         if getattr(args, 'verbose', False):
             print(json.dumps(details, indent=4))
 
-def resolve_items(resolver, args_parts):
+def resolve_for_diff(resolver, args_parts):
     name = args_parts[0]
     db_items = resolver.get_database_items()
     token_prefix = f"{name}/"

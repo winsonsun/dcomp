@@ -62,13 +62,13 @@ def register_namespace(namespace: str, path: str, subparsers, dev_nouns=None):
 def register_all_nouns(subparsers, dev_nouns=None):
     """
     Scans core, domain, and ext namespaces and registers their CLI handlers.
-    Returns a list of discovered domain blueprints.
+    Returns a list of discovered domain modules.
     """
     if dev_nouns is None:
         dev_nouns = {'plugin'}
 
     base_dir = Path(__file__).parent.resolve()
-    blueprints = []
+    domain_modules = []
 
     # 1. Register Core (scanner/core)
     core_dir = base_dir / "core"
@@ -78,12 +78,10 @@ def register_all_nouns(subparsers, dev_nouns=None):
     # 2. Register Domain (scanner/fileorg)
     domain_dir = base_dir / "fileorg"
     if domain_dir.exists():
-        blueprint = load_domain_blueprint(domain_dir)
-        if blueprint: blueprints.append(blueprint)
-
         # First, load the Domain's __init__.py to mount cross-cutting verbs (diff, sync, merge)
         try:
             domain_module = importlib.import_module(DOMAIN_NAMESPACE)
+            domain_modules.append(domain_module)
             if hasattr(domain_module, 'register_cli'):
                 domain_module.register_cli(subparsers)
         except Exception as e:
@@ -98,8 +96,9 @@ def register_all_nouns(subparsers, dev_nouns=None):
     ext_dir = plugin_base / "ext"
     if ext_dir.exists():
         # Temporarily add plugin base to sys.path so 'ext.module' can be imported
+        import sys
         if str(plugin_base) not in sys.path:
             sys.path.insert(0, str(plugin_base))
         register_namespace(EXT_NAMESPACE, str(ext_dir), subparsers, dev_nouns)
 
-    return blueprints
+    return domain_modules

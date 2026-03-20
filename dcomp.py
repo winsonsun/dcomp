@@ -103,33 +103,17 @@ if __name__ == "__main__":
     
     # --- DYNAMIC NOUN & WORKFLOW DISCOVERY ---
     from scanner.registry import register_all_nouns
-    blueprints = register_all_nouns(subparsers, dev_nouns={'plugin'})
+    domains = register_all_nouns(subparsers, dev_nouns={'plugin'})
 
-    # Mount Declarative Workflows from Blueprints
-    for bp in blueprints:
-        workflows = bp.get("workflows", {})
-        for name, flow in workflows.items():
+    # --- TRAIT: Cmdcliable MOUNTING ---
+    from scanner.contracts import Cmdcliable
+    # The orchestrator asks the discovered domains if they want to mount their own CLI workflows.
+    for domain_module in domains:
+        if isinstance(domain_module, Cmdcliable):
             try:
-                # Add workflow to top-level subparsers
-                p_flow = subparsers.add_parser(name, help=flow.get("description", "Declarative workflow."))
-                # Workflows typically take standard dcomp arguments
-                p_flow.add_argument("-j", "--job-file", default="jobs.json")
-                p_flow.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+')
-                
-                # Internal handler to execute workflow steps
-                def make_flow_handler(workflow_data):
-                    def handler(args):
-                        print(f"--- Executing Workflow: {workflow_data.get('description')} ---")
-                        # In a future refactor, this would build a real Pipeline object
-                        for step in workflow_data.get("steps", []):
-                            print(f"Step: {step.get('name')} ({step.get('verb')})")
-                        print("Workflow interpretation complete.")
-                    return handler
-                
-                p_flow.set_defaults(func=make_flow_handler(flow))
-            except Exception:
-                # Likely a conflict with an existing noun/verb
-                continue
+                domain_module.mount_cli(subparsers)
+            except Exception as e:
+                print(f"Warning: Domain {domain_module.__name__} failed to mount CLI: {e}", file=sys.stderr)
 
     args = parser.parse_args()
     

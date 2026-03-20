@@ -7,9 +7,8 @@ def run_sync_mode(args):
     Mode: SYNC
     Distributed Synchronization. Generates a manifest or executes one.
     """
-    from scanner.combinators import Pipeline, Rule
-    from scanner.distributed.combinators import SyncManifest
-    from scanner.domain.diff.analyzer import run_diff_mode
+    from scanner.fileorg.verbs.diff import run_diff_mode
+    from scanner.entities import EntityResolver
 
     if args.action == 'plan':
         print(f"--- Running SYNC (Plan) ---")
@@ -23,11 +22,27 @@ def run_sync_mode(args):
             print("Failed to compute diff.")
             return
 
-        pipeline = Pipeline([
-            SyncManifest(job_name=f"sync_{args.left}_to_{args.right}")
-        ])
+        resolver = EntityResolver(
+            media_cache_files=getattr(args, 'scan_files', ["cache.json"]),
+            metadata_file=getattr(args, 'metadata_file', "metadata.json"),
+            paths_file=getattr(args, 'paths_file', "~/.dcomp/paths.json"),
+            jobs_file=getattr(args, 'job_file', "jobs.json")
+        )
         
-        manifest = pipeline.execute(diff_data)
+        try:
+            target_noun = resolver.get_noun_module(args.right)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return
+            
+        from scanner.contracts import Syncable
+        if not isinstance(target_noun, Syncable):
+            print(f"Error: Noun for '{args.right}' does not support the Syncable trait.")
+            return
+            
+        manifest = target_noun.generate_sync_manifest(diff_data)
+        manifest['job_name'] = f"sync_{args.left}_to_{args.right}"
+        manifest['target_uri'] = args.right
         
         out_file = args.out or 'sync_manifest.json'
         with open(out_file, 'w', encoding='utf-8') as f:
@@ -57,15 +72,39 @@ def run_sync_mode(args):
             if len(pending) > 10: print("  ...")
             return
             
-        # Basic execution wrapper (would be expanded in FS_Exec combinator)
-        import shutil
+        target_uri = manifest.get('target_uri')
+        if not target_uri:
+            print("Error: Manifest missing 'target_uri'. Cannot resolve executing Noun.")
+            return
+            
+        resolver = EntityResolver(
+            media_cache_files=getattr(args, 'scan_files', ["cache.json"]),
+            metadata_file=getattr(args, 'metadata_file', "metadata.json"),
+            paths_file=getattr(args, 'paths_file', "~/.dcomp/paths.json"),
+            jobs_file=getattr(args, 'job_file', "jobs.json")
+        )
+        
+        try:
+            target_noun = resolver.get_noun_module(target_uri)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return
+            
+        from scanner.contracts import Syncable
+        if not isinstance(target_noun, Syncable):
+            print(f"Error: Noun for '{target_uri}' does not support the Syncable trait.")
+            return
+            
         success_count = 0
         for intent in pending:
-            # Here we would use the Location combinator to resolve 'source' to a real physical path on this machine
             print(f"Executing: {intent['action']} on {intent.get('target_rel')}")
-            # Mocking success for architecture demo
-            intent['status'] = 'success'
-            success_count += 1
+            # The trait handles execution logic physically
+            success = target_noun.execute_sync_intent(intent)
+            if success:
+                intent['status'] = 'success'
+                success_count += 1
+            else:
+                intent['status'] = 'failed'
             
             # Save progress periodically
             if success_count % 10 == 0:
@@ -73,8 +112,10 @@ def run_sync_mode(args):
                     json.dump(manifest, f, indent=2)
                     
         # Final save
-        manifest['status'] = 'complete'
+        if len(pending) > 0 and success_count == len(pending):
+            manifest['status'] = 'complete'
+            
         with open(manifest_file, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2)
             
-        print(f"Sync complete. {success_count} actions performed.")
+        print(f"Sync complete. {success_count} actions performed successfully.")

@@ -35,3 +35,14 @@ class Mergeable(Protocol):
     """
     def merge_state(self, local_state: Any, remote_state: Any, policy: Any) -> Any:
         ...
+
+@runtime_checkable
+class Cmdcliable(Protocol):
+    """
+    Contract for Domains or Nouns that expose a Command Line Interface (CLI).
+    If implemented, the central orchestrator will call this method to mount
+    the component's commands onto the global parser.
+    """
+    def mount_cli(self, subparsers: Any) -> None:
+        ...
+

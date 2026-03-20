@@ -180,7 +180,7 @@ def format_output(matched, args):
         if getattr(args, 'verbose', False):
             print(json.dumps(details, indent=4))
 
-def resolve_items(resolver, args_parts):
+def resolve_for_diff(resolver, args_parts):
     name = args_parts[0]
     scenes = resolver.get_scenes()
     if name not in scenes:
@@ -190,6 +190,20 @@ def resolve_items(resolver, args_parts):
     
     db_items = resolver.get_database_items()
     return {ref: db_items.get(ref, {}) for ref in dbrefs if ref in db_items}
+
+def generate_sync_manifest(diff_data):
+    """Fulfills the Syncable Trait."""
+    from scanner.distributed.combinators import SyncManifest
+    from scanner.combinators import Pipeline
+    pipeline = Pipeline([SyncManifest(job_name="scene_sync")])
+    return pipeline.execute(diff_data)
+
+def execute_sync_intent(intent):
+    """Fulfills the Syncable Trait."""
+    # Here the specific Noun executes the intent using its domain logic.
+    # E.g., copying videos or updating scene paths.
+    # For now, return True to simulate successful execution.
+    return True
 
 def prune(args, master_scan_data):
     scenes = master_scan_data.get('scenes', {})
