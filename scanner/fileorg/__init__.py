@@ -43,26 +43,54 @@ def register_cli(subparsers):
     p_merge.add_argument("--out", required=True, help="The output JSON file path.")
     p_merge.add_argument("--rule", help="Optional JSON file defining conflict resolution policies.")
     p_merge.set_defaults(func=run_merge_mode)
-
 def mount_cli(subparsers):
     """
     Fulfills the Cmdcliable trait for the fileorg domain.
-    Reads the domain.json blueprint and delegates the creation of CLI workflows
-    to the core.cliux Noun.
+    1. Discovers all CLI-enabled nouns via the cliux contract stream.
+    2. Mounts discovered noun commands.
+    3. Mounts domain-level AOT workflows.
     """
     import json
     from pathlib import Path
     import sys
-    
+    from scanner.core.cliux.noun import discover_cli_nouns
+
     domain_json_path = Path(__file__).parent / "domain.json"
     if not domain_json_path.exists():
         return
-        
+
     try:
         with open(domain_json_path, 'r') as f:
             blueprint = json.load(f)
-            
-        # Import the AOT compiled workflows
+
+        # --- 1. RXJS-STYLE DISCOVERY ---
+        # We subscribe to the contract stream, filtered by our provides_context
+        provides = blueprint.get("provides_context", [])
+        discovered_routing = discover_cli_nouns(provides)
+
+        # --- 2. MOUNT NOUN COMMANDS ---
+        # For each discovered noun that satisfies the IO Monad Terminal context
+        for entry in discovered_routing:
+            ns = entry["namespace"]
+            # Extract the short noun name (e.g. fileorg.scene -> scene)
+            noun_name = ns.split('.')[-1]
+            commands = entry["commands"]
+
+            try:
+                # We skip 'fs' and 'scan' as they are registered by core.fs legacy
+                if noun_name in ['fs', 'scan']: continue
+
+                p_noun = subparsers.add_parser(noun_name, help=f"Manage {noun_name} via {ns}")
+                noun_sub = p_noun.add_subparsers(dest="verb", required=True)
+
+                for cmd_name, cmd_data in commands.items():
+                    p_cmd = noun_sub.add_parser(cmd_name, help=cmd_data.get("description", ""))
+                    # Link to the noun's internal register_cli if it exists (legacy bridge)
+                    # or eventually use cliux.mount_dido directly
+            except Exception:
+                continue
+
+        # --- 3. MOUNT DOMAIN WORKFLOWS ---
         try:
             from . import generated_workflows
         except ImportError:
@@ -70,6 +98,7 @@ def mount_cli(subparsers):
 
         workflows = blueprint.get("workflows", {})
         for name, flow in workflows.items():
+...
             try:
                 p_flow = subparsers.add_parser(name, help=flow.get("description", "Declarative workflow."))
                 p_flow.add_argument("-j", "--job-file", default="jobs.json")

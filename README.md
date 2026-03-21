@@ -18,28 +18,28 @@ Ensure you have Python 3.8+ installed. No external dependencies are required for
 ### Manage Jobs
 ```bash
 # Add a directory to the default job
-python3 dcomp.py jobs manage -d /Volumes/Media/Movies
+python3 scanner.py job manage -d /Volumes/Media/Movies
 
 # List configured jobs
-python3 dcomp.py jobs list
+python3 scanner.py job list
 ```
 
 ### Scan and Detect
 ```bash
 # Perform the scan
-python3 dcomp.py scan --hash
+python3 scanner.py scan --hash
 
 # Detect scenes using directory name heuristics
-python3 dcomp.py scenes detect --scene-owner owners.json
+python3 scanner.py scenes detect --scene-owner owners.json
 ```
 
 ### Query Data
 ```bash
 # Find all large video files
-python3 dcomp.py files query --ext .mp4 --size-gt 5000000000
+python3 scanner.py files query --ext .mp4 --size-gt 5000000000
 
 # Search for specific scenes
-python3 dcomp.py scenes query --scene BMW-222
+python3 scanner.py scenes query --scene BMW-222
 ```
 
 ## For Developers
@@ -61,7 +61,7 @@ See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details a
 
 ## Command Overview (Noun-First)
 
-*   **`jobs`**: `list`, `manage`
+*   **`job`**: `list`, `manage`
 *   **`scenes`**: `detect`, `query`, `prune`, `generate`
 *   **`files`**: `query`, `prune`
 *   **`paths`**: `list`, `resolve`, `tokenize`, `update`, `get`

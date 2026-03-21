@@ -426,6 +426,7 @@ def run_scaffold_verb(args):
             "type": "object",
             "description": "Define the structural requirements for this Noun's internal state here."
         },
+        "inversed_didos": [],
         "didos": {},
         "cli_commands": {
             "groups": {}
@@ -530,6 +531,35 @@ def run_compile_workflows_verb(args):
         print(f"No workflows found in {domain_name} blueprint.")
         return
 
+    domain_context = set(blueprint.get("provides_context", []))
+
+    def _load_noun_contract(dido_path):
+        parts = dido_path[1:].split('.')
+        if len(parts) == 3:
+            domain, noun, _ = parts
+            path = Path("scanner") / domain / noun / "noun.json"
+        elif len(parts) == 2:
+            domain, _ = parts
+            # Domain verbs are listed in domain.json, we return the domain blueprint itself
+            return blueprint
+        else:
+            return None
+            
+        if path.exists():
+            with open(path, 'r') as f: return json.load(f)
+        return None
+        
+    def _validate_inversed_didos(contract, dido_path, flow_id, node_id):
+        if not contract: return True
+        needs = set(contract.get("inversed_didos", []))
+        missing = needs - domain_context
+        if missing:
+            print(f"SEMANTIC CONTEXT ERROR in workflow '{flow_id}' (node '{node_id}'):", file=sys.stderr)
+            print(f"  Dido '{dido_path}' requires Inversed Didos: {list(missing)}", file=sys.stderr)
+            print(f"  But the Active Source '{domain_name}' does not provide them.", file=sys.stderr)
+            return False
+        return True
+
     generated_file = domain_dir / "generated_workflows.py"
     output = [
         "#!/usr/bin/env python3",
@@ -554,6 +584,10 @@ def run_compile_workflows_verb(args):
             node_id = node.get("id")
             dido_path = node.get("dido", "")
             
+            contract = _load_noun_contract(dido_path)
+            if not _validate_inversed_didos(contract, dido_path, flow_id, node_id):
+                return
+                
             # 1. Resolve imports and function name
             path_parts = dido_path[1:].split('.')
             if len(path_parts) == 3: # @fileorg.scene.detect

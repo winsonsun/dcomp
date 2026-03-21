@@ -52,6 +52,50 @@ def _create_command_handler(dido_path: str):
             sys.exit(1)
     return handler
 
+def _load_all_contracts():
+    """Generator yielding every noun.json contract in the ecosystem."""
+    from pathlib import Path
+    import json
+    base_dir = Path("scanner")
+    for json_path in base_dir.rglob("noun.json"):
+        try:
+            with open(json_path, 'r') as f:
+                yield json.load(f)
+        except Exception:
+            continue
+
+def discover_cli_nouns(provides_context: list):
+    """
+    An FP-style discovery pipeline.
+    Filters the contract stream by cli_commands presence and inversed_dido fulfillment.
+    """
+    from scanner.combinators import Pipeline, Filter, Rule, Map
+    
+    provides_set = set(provides_context)
+
+    def has_commands(contract):
+        return "cli_commands" in contract and contract["cli_commands"].get("groups")
+
+    def satisfies_inversed(contract):
+        needs = set(contract.get("inversed_didos", []))
+        # If the noun needs something the domain doesn't provide, filter it out.
+        return needs.issubset(provides_set)
+
+    def extract_routing(contract):
+        # Extract namespace and the command groups
+        return {
+            "namespace": contract.get("namespace"),
+            "commands": contract.get("cli_commands", {}).get("groups", {})
+        }
+
+    pipeline = Pipeline([
+        Filter(Rule(has_commands)),
+        Filter(Rule(satisfies_inversed)),
+        Map(Rule(extract_routing))
+    ])
+
+    return pipeline.execute(list(_load_all_contracts()))
+
 def mount_domain_commands(blueprint: dict, subparsers: argparse._SubParsersAction):
     """
     Reads the 'commands' block of a domain.json blueprint and dynamically
