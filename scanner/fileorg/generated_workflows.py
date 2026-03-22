@@ -38,3 +38,16 @@ def run_scene_sync(args):
     manifest = dido_plan(diff_data=diff)
 
     print(f"--- Workflow scene-sync complete. ---")
+
+def run_test_workflow(args):
+    """Auto-wired workflow: @test_domain.camera.scan | @test_domain.camera.process"""
+    print(f"--- Executing Workflow: test_workflow ---")
+    # Node: step_1 (@test_domain.camera.scan)
+    from scanner.test_domain.camera.noun import scan as dido_step_1
+    dido_step_1(target=getattr(args, 'target', None))
+
+    # Node: step_2 (@test_domain.camera.process)
+    from scanner.test_domain.camera.noun import process as dido_step_2
+    step_2_data = dido_step_2(incoming_stream=step_1)
+
+    print(f"--- Workflow test_workflow complete. ---")

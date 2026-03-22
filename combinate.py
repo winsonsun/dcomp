@@ -282,6 +282,8 @@ def register_cli(subparsers):
     p_add_verb = plugin_sub.add_parser("add-verb", help="Add a new verb to an existing noun.")
     p_add_verb.add_argument("noun", help="Namespace and name of the target noun (e.g., domain.tags).")
     p_add_verb.add_argument("verb_name", help="Name of the new verb (e.g., analyze).")
+    p_add_verb.add_argument("--shape", default="Pipe", choices=["Source", "Pipe", "Sink"], help="The pipeline shape of the verb.")
+    p_add_verb.add_argument("--type", default="Unknown", help="The data type flowing through this verb (e.g., Frame, Scene).")
     p_add_verb.add_argument("--force", action='store_true', help="Allow modifying protected namespaces.")
     p_add_verb.set_defaults(func=run_add_verb_verb)
 
@@ -328,6 +330,121 @@ def register_cli(subparsers):
     p_snapshot.add_argument("output", help="Path to save the JSON snapshot.")
     p_snapshot.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
     p_snapshot.set_defaults(func=run_snapshot_verb)
+
+    # Verb: wire-workflow
+    p_wire = plugin_sub.add_parser("wire-workflow", help="Automate type-safe workflow creation from a chain string.")
+    p_wire.add_argument("name", help="Name of the new workflow (e.g., sync-media).")
+    p_wire.add_argument("--chain", required=True, help="The pipeline chain (e.g., '@core.fs.scan | @fileorg.scene.detect').")
+    p_wire.add_argument("--domain", default="fileorg", help="The target domain to save the workflow into.")
+    p_wire.set_defaults(func=run_wire_workflow_verb)
+
+def run_wire_workflow_verb(args):
+    """Implementation of 'dcomp plugin wire-workflow'."""
+    import json
+    chain_str = args.chain
+    flow_name = args.name.replace('-', '_')
+    domain_name = args.domain
+    
+    parts = [p.strip() for p in chain_str.split('|')]
+    if not parts:
+        print("Error: Empty chain.", file=sys.stderr); return
+
+    nodes = []
+    current_output_type = None
+    
+    for i, p in enumerate(parts):
+        if not p.startswith('@'):
+            print(f"Error: Invalid step '{p}'. Must start with '@'.", file=sys.stderr); return
+        
+        path_parts = p[1:].split('.')
+        if len(path_parts) == 3:
+            d, n, v = path_parts
+            if d == 'core':
+                base = Path("scanner/core")
+            elif d == 'fileorg':
+                base = Path("scanner/fileorg")
+            elif d == 'ext':
+                base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
+            else:
+                base = Path("scanner/nouns")
+            contract_path = base / n / "noun.json"
+        elif len(path_parts) == 2:
+            d, v = path_parts
+            contract_path = Path("scanner") / d / "domain.json"
+        else:
+            print(f"Error: Invalid dido path '{p}'.", file=sys.stderr); return
+
+        if not contract_path.exists():
+            print(f"Error: Contract for '{p}' not found at {contract_path}.", file=sys.stderr); return
+            
+        with open(contract_path, 'r') as f:
+            contract = json.load(f)
+            
+        verb_data = contract.get("didos", {}).get(v)
+        if not verb_data:
+            verb_data = contract.get("workflows", {}).get(v) # Check if it's a sub-workflow
+            if not verb_data:
+                print(f"Error: Verb '{v}' not found in {contract_path}.", file=sys.stderr); return
+
+        shape = verb_data.get("shape", "Pipe")
+        
+        # 1. Validate Shape Flow
+        if i == 0 and shape not in ["Source", "Pipe"]:
+            print(f"Error: Pipeline must start with a Source or Pipe, but '{p}' is a {shape}.", file=sys.stderr); return
+        if i == len(parts) - 1 and shape == "Source":
+             print(f"Warning: Pipeline ends with a Source '{p}'. Output may be ignored.", file=sys.stderr)
+
+        # 2. Validate Type Match
+        verb_inputs = verb_data.get("inputs", {})
+        expected_input = None
+        for k, v_in in verb_inputs.items():
+            if v_in.get("source") == "pipeline":
+                expected_input = v_in.get("type")
+                break
+        
+        if i > 0 and expected_input and current_output_type:
+            if expected_input != current_output_type and "Unknown" not in [expected_input, current_output_type]:
+                 print(f"Error: Type mismatch at step {i} ('{p}'). Expected {expected_input}, but received {current_output_type}.", file=sys.stderr); return
+
+        current_output_type = verb_data.get("outputs", "Unknown")
+        
+        # 3. Create Node
+        node = {
+            "id": f"step_{i+1}",
+            "dido": p,
+            "inputs": {}
+        }
+        # Auto-wire pipeline inputs
+        for k, v_in in verb_inputs.items():
+            if v_in.get("source") == "pipeline":
+                node["inputs"][k] = f"step_{i}" if i > 0 else "None"
+            elif v_in.get("source") == "cli_args":
+                node["inputs"][k] = f"args.{k}"
+        
+        if i > 0: node["provides"] = f"step_{i+1}_data"
+        nodes.append(node)
+
+    # Update domain.json
+    domain_json_path = Path("scanner") / domain_name / "domain.json"
+    if domain_json_path.exists():
+        with open(domain_json_path, 'r') as f:
+            domain_data = json.load(f)
+    else:
+        domain_data = {"namespace": domain_name, "workflows": {}}
+        
+    domain_data.setdefault("workflows", {})[flow_name] = {
+        "description": f"Auto-wired workflow: {args.chain}",
+        "nodes": nodes
+    }
+    
+    with open(domain_json_path, 'w') as f:
+        json.dump(domain_data, f, indent=2)
+        
+    print(f"Successfully wired workflow '{flow_name}' in {domain_json_path}")
+    
+    # Trigger AOT Compilation
+    print("Triggering AOT Compilation...")
+    run_compile_workflows_verb(MockArgs(domain=domain_name))
 
 def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
     parts = full_name.lower().split('.')
@@ -420,13 +537,11 @@ def run_scaffold_verb(args):
     
     json_contract = {
         "namespace": full_name,
-        "description": "Auto-generated noun semantic contract.",
-        "allowed_modifiers": ["<Mem>"],
-        "inner_data_schema": {
-            "type": "object",
-            "description": "Define the structural requirements for this Noun's internal state here."
+        "ai_ontology": {
+            "domain_intent": "Auto-generated domain intent.",
+            "architectural_fit": [],
+            "verbs": {}
         },
-        "inversed_didos": [],
         "didos": {},
         "cli_commands": {
             "groups": {}
@@ -448,7 +563,7 @@ def run_add_verb_verb(args):
         print(f"Error: Cannot modify protected namespace '{namespace}'. Use --force to override.", file=sys.stderr)
         return
         
-    file_path, json_path = get_noun_file_path(full_name)
+    file_path, json_path, _ = get_noun_file_path(full_name)
     if not file_path.exists():
         print(f"Error: Noun '{full_name}' does not exist.", file=sys.stderr)
         return
@@ -483,21 +598,36 @@ def run_add_verb_verb(args):
         try:
             with open(json_path, 'r') as f: contract = json.load(f)
         except Exception:
-            contract = {"namespace": full_name, "didos": {}, "cli_commands": {"groups": {}}}
+            contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "didos": {}, "cli_commands": {"groups": {}}}
     else:
-        contract = {"namespace": full_name, "didos": {}, "cli_commands": {"groups": {}}}
+        contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "didos": {}, "cli_commands": {"groups": {}}}
         
+    contract.setdefault("ai_ontology", {}).setdefault("verbs", {})[verb_name] = {
+        "primary_use_case": f"Auto-generated use case for {verb_name}.",
+        "anti_patterns": [],
+        "edge_case_guidance": ""
+    }
+
     # Register the pure capability
-    contract.setdefault("didos", {})[verb_name] = {
-        "type": "Pure Transformation [T]",
-        "input_requirements": {
-            "schema": "#/inner_data_schema",
-            "required_modifiers": ["<Mem>"],
-            "forbidden_prefixes": ["Raw_"]
-        },
-        "output": "<Mem> Unknown",
+    shape = getattr(args, 'shape', 'Pipe')
+    data_type = getattr(args, 'type', 'Unknown')
+    
+    verb_config = {
+        "shape": shape,
+        "inputs": {},
+        "outputs": f"Stream[{data_type}]" if shape != "Sink" else "None",
         "side_effects": []
     }
+    
+    if shape == "Source":
+        verb_config["inputs"]["target"] = {"type": "string", "source": "cli_args"}
+    elif shape == "Pipe":
+        verb_config["inputs"]["incoming_stream"] = {"type": f"Stream[{data_type}]", "source": "pipeline"}
+    elif shape == "Sink":
+        verb_config["inputs"]["incoming_stream"] = {"type": f"Stream[{data_type}]", "source": "pipeline"}
+        verb_config["inputs"]["output_path"] = {"type": "string", "source": "cli_args"}
+        
+    contract.setdefault("didos", {})[verb_name] = verb_config
     
     # Register the CLI mapping
     contract.setdefault("cli_commands", {}).setdefault("groups", {})[verb_name] = {
