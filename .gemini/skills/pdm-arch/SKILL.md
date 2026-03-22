@@ -16,26 +16,26 @@ When a user asks to implement a new feature, script, or data pipeline, you MUST 
 
 ## 1. The Ecosystem Topology (Physical Boundaries)
 The ecosystem is strictly divided into three distinct physical spaces:
-- **`scanner/core/` (The Kernel - Protected):** Low-level system interactions (AST, IO, CLI framework). Only modified to change the fundamental laws of physics.
-- **`scanner/fileorg/` (The Standard Library - Protected):** Highly stable, official business logic and approved domain nouns. Do not modify casually.
-- **`scanner/ext/` (The Sandbox - Primary User Workspace):** The default entry point for 99% of all new development, feature prototyping, and workflow composition.
+- **`dcomp/core/` (The Kernel - Protected):** Low-level system interactions (AST, IO, CLI framework). Only modified to change the fundamental laws of physics.
+- **`dcomp/fileorg/` (The Standard Library - Protected):** Highly stable, official business logic and approved domain nouns. Do not modify casually.
+- **`dcomp/ext/` (The Sandbox - Primary User Workspace):** The default entry point for 99% of all new development, feature prototyping, and workflow composition.
 
-*Rule: All new exploratory work, workflows, and customizations MUST be isolated in `scanner/ext/` by the `pdm-worker`.*
+*Rule: All new exploratory work, workflows, and customizations MUST be isolated in `dcomp/ext/` by the `pdm-worker`.*
 
 ## 2. The Tri-Tier Decision Matrix (The Growth Law)
 Not all code deserves to be a Noun or a Verb. Before modifying any `noun.json` or `domain.json`, evaluate the requested feature against this matrix. **Always default to the lowest tier possible.**
 
 ### Tier A: The Ad-Hoc Script (Low Reusability)
 *   **Definition:** A one-off script, a highly specific regex cleanup, or a temporary patch.
-*   **Action:** Write a standard Python script in `scanner/ext/`. **DO NOT** create a Noun. **DO NOT** update `noun.json`. Keep it simple and disposable.
+*   **Action:** Write a standard Python script in `dcomp/ext/`. **DO NOT** create a Noun. **DO NOT** update `noun.json`. Keep it simple and disposable.
 
 ### Tier B: The Policy / Hook (Customization & Suppressions)
 *   **Definition:** A cross-cutting rule that alters an existing pipeline (e.g., "Ignore `.tmp` files during scans").
-*   **Action:** Use the **Central Policy Compiler** (`scanner/policy.py`). Inject a `Filter` or `Map` hook into the existing hardcoded pipeline phases within `scanner/ext/`. **DO NOT** create a new Verb. Policies handle the localized edge cases; Verbs handle universal transformations.
+*   **Action:** Use the **Central Policy Compiler** (`dcomp/policy.py`). Inject a `Filter` or `Map` hook into the existing hardcoded pipeline phases within `dcomp/ext/`. **DO NOT** create a new Verb. Policies handle the localized edge cases; Verbs handle universal transformations.
 
 ### Tier C: The Noun / Verb (High Abstraction & Reusability)
 *   **Definition:** A highly abstract, reusable data transformation that is, or will be, used in **3+ different workflows** across the CLI.
-*   **Action:** Scaffold a formal Noun and Verb in `scanner/ext/`. You MUST define its **Dual-Brain Cell** in `noun.json` using `combinate.py plugin add-verb`.
+*   **Action:** Scaffold a formal Noun and Verb in `dcomp/ext/`. You MUST define its **Dual-Brain Cell** in `noun.json` using `combinate.py plugin add-verb`.
 
 ## 3. The Dual-Brain Cell Architecture
 If a feature graduates to Tier C (Noun/Verb), it MUST follow the Dual-Brain Cell structure in `noun.json`. This ensures the semantic intent is separated from the structural execution engine.
@@ -62,4 +62,4 @@ To prevent "Verb-Drift" and "Environmental Mismatches", you MUST NOT invent ad-h
 JSON is for structural and semantic metadata only. **All execution logic must be written in pure, debuggable Python.** Do not invent new string-based mini-languages or parsers inside JSON files.
 
 ## Summary
-You are the guardian of the architecture. You protect the core (`scanner/core/`, `scanner/fileorg/`) by isolating growth in the sandbox (`scanner/ext/`). You prevent over-engineering by enforcing the Tri-Tier Matrix (Script -> Policy -> Noun). You enable intelligent growth by enforcing Dual-Brain Cells and Port Contracts.
+You are the guardian of the architecture. You protect the core (`dcomp/core/`, `dcomp/fileorg/`) by isolating growth in the sandbox (`dcomp/ext/`). You prevent over-engineering by enforcing the Tri-Tier Matrix (Script -> Policy -> Noun). You enable intelligent growth by enforcing Dual-Brain Cells and Port Contracts.

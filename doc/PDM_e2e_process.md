@@ -35,7 +35,7 @@ Legend (Data Operations - The Application Pipeline):
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Physical Files (OS)** | **[I]** Read UUIDs | **[I]** Read stats/hash | | | | **[E]** Copy/Delete | **[I]** Check exists |
 | **Job Definitions** | **[T]** Define targets | **[I]** Direct scanner | | **[I]** Aliases for diff | **[I]** Target for sync | | |
-| **Path Tokens** | **[T]** Tokenize mount | **[I]** Resolve paths | | **[I]** Resolve paths | **[I]** Resolve paths | **[I]** Resolve paths | **[V]** Check validity |
+| **Path Tokens** | **[T]** Alias mount | **[I]** Resolve paths | | **[I]** Resolve paths | **[I]** Resolve paths | **[I]** Resolve paths | **[V]** Check validity |
 | **Raw Catalog Cache** | | **[T]** Build tree, **[D]** Save | **[I]** Source data | **[V]** Diff states, **[D]** Report | **[V]** Compare states | | **[V]** Find orphans, **[D]** Save |
 | **Scene Metadata** | | | **[T]** Group by regex, **[D]** Save | **[I]** Source data, **[D]** Report | | | **[V]** Drop empty, **[D]** Save |
 | **Action Manifests** | | | | | **[T]** Generate plan, **[D]** Save | **[I]** Read plan | |

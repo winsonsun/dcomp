@@ -38,11 +38,11 @@ Instead of polling the disk manually, you plug your existing Combinator pipeline
 Pipeline([
     Watch(directory="/Volumes/DriveA"),  # Yields an event when a file is saved
     Filter(Rule(is_video)),
-    Map(Rule(tokenize)),
+    Map(Rule(alias)),
     Dump("media_cache.json")
 ]).execute_forever()
 ```
-The program would run invisibly in the background. As soon as a new video finishes downloading or rendering, it is instantly tokenized, added to the database, and assigned a Scene Owner, keeping the metadata 100% real-time without ever having to run a 10-minute full-drive scan again!
+The program would run invisibly in the background. As soon as a new video finishes downloading or rendering, it is instantly aliased, added to the database, and assigned a Scene Owner, keeping the metadata 100% real-time without ever having to run a 10-minute full-drive scan again!
 
 ---
 

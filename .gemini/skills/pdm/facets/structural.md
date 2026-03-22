@@ -19,7 +19,7 @@ When this facet is active, the PDM must be accompanied by a JSONL block that `co
 ```jsonl
 {"op": "scaffold_noun", "target": "filters", "description": "Global file filtering policies"}
 {"op": "scaffold_verb", "noun": "filters", "verb": "reject_tmp", "description": "Reject .tmp files during pre_scan"}
-{"op": "inject_code", "file": "scanner/modes.py", "anchor_text": "scan_steps = [FS_Scan(base_path, do_hash=args.hash)]", "position": "after", "content": "                \n                # [INJECTED BY PDM] Apply global pre_scan filters\n                pre_scan_rules = policy.get_rules('pre_scan', context)\n                for r in pre_scan_rules:\n                    scan_steps.append(Filter(r))\n"}
+{"op": "inject_code", "file": "dcomp/modes.py", "anchor_text": "scan_steps = [FS_Scan(base_path, do_hash=args.hash)]", "position": "after", "content": "                \n                # [INJECTED BY PDM] Apply global pre_scan filters\n                pre_scan_rules = policy.get_rules('pre_scan', context)\n                for r in pre_scan_rules:\n                    scan_steps.append(Filter(r))\n"}
 {"op": "snapshot", "label": "pre_refactor_baseline"}
 {"op": "verify", "against": "pre_refactor_baseline", "on_fail": "rollback"}
 ```

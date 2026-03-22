@@ -7,7 +7,7 @@ A professional tool for scanning directory metadata, managing jobs, detecting "s
 *   **Combinator DSL**: Built on a modular Domain-Specific Language (DSL) of functional combinators.
 *   **Fluent API**: Clean, chainable syntax for building complex data pipelines.
 *   **Noun-First CLI**: Resource-oriented command structure (`scanner <noun> <verb>`) for high extensibility.
-*   **Tokenized Path Management**: Tracks physical drives by UUID; update the mount point once, and millions of file references stay valid.
+*   **Aliased Path Management**: Tracks physical drives by UUID; update the mount point once, and millions of file references stay valid.
 *   **Distributed Sync**: Plan sync manifests on one machine and execute them on another with automatic path translation.
 
 ## Quick Start
@@ -48,7 +48,7 @@ The project uses a **Combinator-based architecture**. You can easily add new Nou
 
 ### Example: Custom Pipeline
 ```python
-from scanner.combinators import Stream, Load
+from dcomp.combinators import Stream, Load
 
 # Chain operations using the Fluent API
 results = (Stream(Load("cache.json", "database.items"))
@@ -64,7 +64,7 @@ See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details a
 *   **`job`**: `list`, `manage`
 *   **`scenes`**: `detect`, `query`, `prune`, `generate`
 *   **`files`**: `query`, `prune`
-*   **`paths`**: `list`, `resolve`, `tokenize`, `update`, `get`
+*   **`paths`**: `list`, `resolve`, `alias`, `update`, `get`
 *   **Global Verbs**: `scan`, `diff`, `sync`, `merge`
 
 ---
@@ -75,7 +75,7 @@ See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details a
 The system state is managed through a typed `ScanContext` object, replacing old, deeply-nested dictionaries with discoverable, IDE-friendly properties.
 
 ### Modular CLI
-Each noun in `scanner/nouns/` is a plugin that defines its own CLI verbs, making the system highly extensible.
+Each noun in `dcomp/nouns/` is a plugin that defines its own CLI verbs, making the system highly extensible.
 
 ---
 

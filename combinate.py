@@ -360,17 +360,17 @@ def run_wire_workflow_verb(args):
         if len(path_parts) == 3:
             d, n, v = path_parts
             if d == 'core':
-                base = Path("scanner/core")
+                base = Path("dcomp/core")
             elif d == 'fileorg':
-                base = Path("scanner/fileorg")
+                base = Path("dcomp/fileorg")
             elif d == 'ext':
                 base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
             else:
-                base = Path("scanner/nouns")
+                base = Path("dcomp/nouns")
             contract_path = base / n / "noun.json"
         elif len(path_parts) == 2:
             d, v = path_parts
-            contract_path = Path("scanner") / d / "domain.json"
+            contract_path = Path("dcomp") / d / "domain.json"
         else:
             print(f"Error: Invalid dido path '{p}'.", file=sys.stderr); return
 
@@ -425,7 +425,7 @@ def run_wire_workflow_verb(args):
         nodes.append(node)
 
     # Update domain.json
-    domain_json_path = Path("scanner") / domain_name / "domain.json"
+    domain_json_path = Path("dcomp") / domain_name / "domain.json"
     if domain_json_path.exists():
         with open(domain_json_path, 'r') as f:
             domain_data = json.load(f)
@@ -454,13 +454,13 @@ def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
         namespace, noun_name = parts[0], parts[1]
         
     if namespace == 'core':
-        base = Path("scanner/core")
+        base = Path("dcomp/core")
     elif namespace == 'fileorg':
-        base = Path("scanner/fileorg")
+        base = Path("dcomp/fileorg")
     elif namespace == 'ext':
         base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
     else:
-        base = Path("scanner/nouns")
+        base = Path("dcomp/nouns")
         
     folder = base / noun_name
     return folder / "noun.py", folder / "noun.json", folder
@@ -490,8 +490,8 @@ def run_scaffold_verb(args):
         f.write("from .noun import register_cli\n")
     template = textwrap.dedent(f'''\
         import json
-        from scanner.combinators import Pipeline, Load, Filter, Rule, Stream
-        from scanner.nouns import Noun
+        from dcomp.combinators import Pipeline, Load, Filter, Rule, Stream
+        from dcomp.nouns import Noun
         from typing import Any, Dict, List
 
         def register_cli(subparsers):
@@ -645,7 +645,7 @@ def run_compile_workflows_verb(args):
     The AOT Compiler: Translates domain.json DAGs into physical Python code.
     """
     domain_name = args.domain.lower()
-    domain_dir = Path("scanner") / domain_name
+    domain_dir = Path("dcomp") / domain_name
     blueprint_path = domain_dir / "domain.json"
     
     if not blueprint_path.exists():
@@ -667,7 +667,7 @@ def run_compile_workflows_verb(args):
         parts = dido_path[1:].split('.')
         if len(parts) == 3:
             domain, noun, _ = parts
-            path = Path("scanner") / domain / noun / "noun.json"
+            path = Path("dcomp") / domain / noun / "noun.json"
         elif len(parts) == 2:
             domain, _ = parts
             # Domain verbs are listed in domain.json, we return the domain blueprint itself
@@ -930,7 +930,7 @@ def run_execute_verb(args):
 
 def run_verify_verb(args):
     """Implementation of 'dcomp plugin verify'."""
-    from scanner import load_and_merge_scans
+    from dcomp import load_and_merge_scans
     import json
     
     print("--- Verifying System State ---")

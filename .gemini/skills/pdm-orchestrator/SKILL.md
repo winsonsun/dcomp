@@ -25,7 +25,7 @@ Before generating any code, you MUST mathematically prove the chain is valid usi
 - **Default Namespace:** Always target the `ext` domain for new workflows to protect the core and official domains from invasive changes.
 
 ### 4. Verification Phase
-- Confirm the AOT compiler successfully generated the Python code in `scanner/ext/generated_workflows.py`.
+- Confirm the AOT compiler successfully generated the Python code in `dcomp/ext/generated_workflows.py`.
 - Trigger the `pdm` skill to draw the matrix of the newly created workflow to verify its structural integrity to the user.
 
 ## Core Rules

@@ -20,7 +20,7 @@ This is the root object returned by the skill.
 {
   "pdm_response": {
     "meta": {
-      "target_file": "string (e.g., 'dcomp.py')",
+      "target_file": "string (e.g., 'dcomp_cli.py')",
       "vantage": "string (e.g., 'E2E Business Workflow')",
       "facets_applied": ["string", "string"]
     },
