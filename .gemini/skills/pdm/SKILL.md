@@ -39,7 +39,7 @@ When a user asks to map out an architecture, analyze a data pipeline, or underst
         *   **Mode 2: Deep/AST (Hierarchical Analysis):** The full multi-layered, state-tracked, caching approach with semantic zooming.
     *   **Vantage Selection (UX Representation Style):** A `Vantage` determines *how* the matrix is formatted to best answer the user's intent, acting as the central intelligence for representation style. If the user asks to map an architecture but does not explicitly specify the vantage, you must **auto-select** the appropriate Vantage based on the requested target. If ambiguous, use `ask_user`:
         *   **[Vantage: E2E Business Workflow] (Default Layer 1):** Focus on high-level user steps, immutable ledgers, and physical boundaries. (Columns: Discovered business phases. Rows: Macro-entities like `(Local) FS`, `Manifest`).
-        *   **[Vantage: Component Execution]:** Focus on code-level execution, memory state, and program data. (Columns: Function calls or sub-routines. Rows: Data structures like `AST`, `Scan Context`).
+        *   **Constraint:** NEVER generate matrices or graphs tracking literal Python function calls, AST nodes, or code-level execution steps. You must strictly track the lifecycle of the Data Stream (RxJS style) and the abstract Workflow Phases.
         *   **[Vantage: Topological Sync]:** Focus on data flow across boundaries. (Columns: State transitions. Rows: Distributed nodes like `Machine A`, `NAS B`).
         *   **Custom:** Allow the user to specify any custom Vantage style.
     *   **Target Selection:** If the request is missing specificity (e.g., "Analyze the sync process" or "switch facet" or "dive deeper" without specifying exactly which facet or phase), ask: "Which facet? 1. Lineage 2. Network 3. Concurrency" or "Which phase? 1. Input Resolution 2. Subtraction".
@@ -132,7 +132,8 @@ To rapidly respond to semantic zoom requests and incrementally build a graph dat
 1.  **The Fast Cache (JSONL Format):** Each generated matrix (view) must be saved as an independent JSON object on a new line in `.gemini/pdm_cache.jsonl`.
     *   **Index Key:** Each line must have an `"index": "{layer}_{vantage}_{anchor_entity}"`.
     *   **Influences:** Each line must declare an array of `"influences": []` containing the index keys of any downstream matrices that depend on it.
-    *   *Example Line:* `{"index": "1_E2E_Macro", "matrix": {...}, "influences": ["2_Component_scene_nodes"]}`
+    *   **Graph Constraints:** The graph model and `influences` array MUST ONLY track **Data Lineage** (e.g., Stream A -> Pipe B -> Stream C). It must never map code topology.
+    *   *Example Line:* `{"index": "1_E2E_Macro", "matrix": {...}, "influences": ["2_DataStream_scene_nodes"]}`
 2.  **Cache Hit & Reuse:** Before analyzing code to generate a new PDM, ALWAYS read `.gemini/pdm_cache.jsonl`. If the requested index (e.g., `2_Component_scene_nodes`) already exists, you MUST reuse the cached matrix instantly to save time.
 3.  **Graceful Invalidation (Broadcast):** If the user modifies code or explicitly asks to regenerate a matrix (e.g., `1_E2E_Macro`), you must NOT delete the whole cache. Instead, read the `"influences"` array of that line and gracefully delete (invalidate) all downstream index keys from the `.jsonl` file.
 4.  **Semantic Navigation (Up/Down/Switch):** When the user asks to "zoom out", "dive deeper", or "switch facet", calculate the target Index Key. Check the cache first. If missing, generate it, append it to the `.jsonl` file as a new line, and print the requested view.

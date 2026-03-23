@@ -47,7 +47,6 @@ class Stream:
     """Fluent API wrapper for building pipelines."""
     def __init__(self, source):
         if isinstance(source, list) and not all(callable(s) for s in source):
-            # If it's a raw list/dict, use it as a static source
             self.pipeline = Pipeline([MockSource(source)])
         elif isinstance(source, dict):
              self.pipeline = Pipeline([MockSource(source)])
@@ -95,12 +94,17 @@ class Log(Combinator):
     def __call__(self, data):
         import logging
         log_func = getattr(logging, self.level.lower(), logging.info)
-        # Log summary or specific slice based on rule
-        val = self.rule(data)
-        if isinstance(val, (dict, list)):
-            log_func(f"{self.msg} (Length: {len(val)})")
+        
+        # In a generator world, we don't want to consume the generator just to log its length.
+        # So we just log the presence of the stream unless it's a materialized collection.
+        if isinstance(data, (dict, list)):
+            val = self.rule(data)
+            if isinstance(val, (dict, list)):
+                log_func(f"{self.msg} (Length: {len(val)})")
+            else:
+                log_func(f"{self.msg} {val}")
         else:
-            log_func(f"{self.msg} {val}")
+            log_func(f"{self.msg} [Active Stream/Generator]")
         return data
 
 class MockSource(Combinator):
@@ -120,8 +124,10 @@ class AssertSink(Combinator):
         import unittest
         tc = unittest.TestCase()
         tc.maxDiff = None
-        tc.assertEqual(data, self.expected_payload)
-        return True # Or return data to pass it through
+        # Materialize for assertion
+        materialized = dict(data) if isinstance(self.expected_payload, dict) else list(data) if not isinstance(data, (dict, list)) else data
+        tc.assertEqual(materialized, self.expected_payload)
+        return True
 
 class TestCase:
     """The Test Runner. Orchestrates a full test pipeline and catches assertions."""
@@ -131,7 +137,10 @@ class TestCase:
         
     def run(self):
         try:
-            self.pipeline.execute()
+            # We exhaust the pipeline to trigger assertions
+            result = self.pipeline.execute()
+            if hasattr(result, '__iter__') and not isinstance(result, (dict, list, str)):
+                list(result)
             print(f"PASS: {self.name}")
             return True
         except AssertionError as e:
@@ -146,35 +155,40 @@ class TestCase:
 # TIER 1: Core Data Primitives (Math)
 # ==========================================
 
+def _ensure_iterable(data):
+    if isinstance(data, dict):
+        return data.items()
+    if data is None:
+        return []
+    return data
+
 class Filter(Combinator):
-    """The Gatekeeper. Removes elements that do not match the rule."""
+    """The Gatekeeper. Yields elements that match the rule (Lazy)."""
     def __init__(self, rule):
         self.rule = Rule(rule)
         
     def __call__(self, data):
-        if isinstance(data, dict):
-            return {k: v for k, v in data.items() if self.rule((k, v))}
-        return [x for x in data if self.rule(x)]
+        iterable = _ensure_iterable(data)
+        return (x for x in iterable if self.rule(x))
 
 class Map(Combinator):
-    """The Mutator. Transforms each element using the rule."""
+    """The Mutator. Yields transformed elements using the rule (Lazy)."""
     def __init__(self, rule):
         self.rule = Rule(rule)
         
     def __call__(self, data):
-        if isinstance(data, dict):
-            return {k: self.rule((k, v)) for k, v in data.items()}
-        return [self.rule(x) for x in data]
+        iterable = _ensure_iterable(data)
+        return (self.rule(x) for x in iterable)
 
 class Group(Combinator):
-    """The Aggregator. Groups elements by a derived key, optionally mapping the values."""
+    """The Aggregator. Groups elements by a derived key. (Stateful, materializes internally)."""
     def __init__(self, by, collect = None):
         self.by = Rule(by)
         self.collect = Rule(collect) if collect else None
         
     def __call__(self, data):
         result = {}
-        iterable = data.items() if isinstance(data, dict) else data
+        iterable = _ensure_iterable(data)
         for item in iterable:
             key = self.by(item)
             if key is not None:
@@ -183,39 +197,41 @@ class Group(Combinator):
         return result
 
 class Difference(Combinator):
-    """The Subtractor. Returns items in stream_A not in stream_B."""
+    """The Subtractor. Yields items in stream_A not in stream_B (Lazy over A)."""
     def __init__(self, stream_b_provider):
-        # provider can be a static list/dict or a Combinator that fetches it
         self.stream_b_provider = stream_b_provider
         
     def __call__(self, stream_a):
         stream_b = self.stream_b_provider() if callable(self.stream_b_provider) else self.stream_b_provider
         
+        # Materialize B's keys/items for fast lookup
         b_keys = set(stream_b.keys() if isinstance(stream_b, dict) else stream_b)
         
-        if isinstance(stream_a, dict):
-            return {k: v for k, v in stream_a.items() if k not in b_keys}
-        return [x for x in stream_a if x not in b_keys]
+        iterable_a = _ensure_iterable(stream_a)
+        
+        # If A was yielding tuples (k, v), filter by k
+        for x in iterable_a:
+            key = x[0] if isinstance(x, tuple) and len(x) == 2 else x
+            if key not in b_keys:
+                yield x
 
 class FlatMap(Combinator):
-    """A variation of Map that flattens lists of lists."""
+    """A variation of Map that flattens lists of lists (Lazy)."""
     def __init__(self, rule):
         self.rule = Rule(rule)
 
     def __call__(self, data):
-        result = []
-        iterable = data.items() if isinstance(data, dict) else data
+        iterable = _ensure_iterable(data)
         for item in iterable:
             val = self.rule(item)
             if val is not None:
                 if isinstance(val, list):
-                    result.extend(val)
+                    yield from val
                 else:
-                    result.append(val)
-        return result
+                    yield val
 
 class Intersect(Combinator):
-    """The Comparator. Returns items present in both streams."""
+    """The Comparator. Yields items present in both streams (Lazy over A)."""
     def __init__(self, stream_b_provider):
         self.stream_b_provider = stream_b_provider
         
@@ -224,12 +240,14 @@ class Intersect(Combinator):
         
         b_keys = set(stream_b.keys() if isinstance(stream_b, dict) else stream_b)
         
-        if isinstance(stream_a, dict):
-            return {k: v for k, v in stream_a.items() if k in b_keys}
-        return [x for x in stream_a if x in b_keys]
+        iterable_a = _ensure_iterable(stream_a)
+        for x in iterable_a:
+            key = x[0] if isinstance(x, tuple) and len(x) == 2 else x
+            if key in b_keys:
+                yield x
 
 class Join(Combinator):
-    """The Relational Bridge. Merges items based on a shared key rule."""
+    """The Relational Bridge. Yields merged items based on a shared key rule (Lazy over A)."""
     def __init__(self, stream_b_provider, on_key):
         self.stream_b_provider = stream_b_provider
         self.on_key = Rule(on_key)
@@ -237,27 +255,27 @@ class Join(Combinator):
     def __call__(self, stream_a):
         stream_b = self.stream_b_provider() if callable(self.stream_b_provider) else self.stream_b_provider
         
-        result = {}
-        iterable = stream_a.items() if isinstance(stream_a, dict) else stream_a
-        for item in iterable:
+        # Normalize stream B to a dict for fast lookup if it isn't already
+        if not isinstance(stream_b, dict):
+            stream_b = {self.on_key(item): item for item in _ensure_iterable(stream_b)}
+            
+        iterable_a = _ensure_iterable(stream_a)
+        for item in iterable_a:
             join_key = self.on_key(item)
             if join_key in stream_b:
-                # Merge logic
-                result[join_key] = {
-                    "left": item,
+                yield (join_key, {
+                    "left": item[1] if isinstance(item, tuple) and len(item) == 2 else item,
                     "right": stream_b[join_key]
-                }
-        return result
-
+                })
 
 class Partition(Combinator):
-    """The Stream Splitter. Routes elements into multiple buckets based on rules."""
+    """The Stream Splitter. Routes elements into multiple buckets based on rules (Stateful)."""
     def __init__(self, routes: dict):
         self.routes = {name: Rule(rule) for name, rule in routes.items()}
         
     def __call__(self, data):
         result = {name: [] for name in self.routes}
-        iterable = data.items() if isinstance(data, dict) else data
+        iterable = _ensure_iterable(data)
         for item in iterable:
             for name, rule in self.routes.items():
                 if rule(item):
@@ -265,32 +283,33 @@ class Partition(Combinator):
         return result
 
 class CacheHit(Combinator):
-    """Specialized Filter/Map that replaces live data with cached data if a rule matches."""
+    """Specialized Filter/Map that yields cached data if a rule matches (Lazy)."""
     def __init__(self, cache_provider, match_rule):
         self.cache_provider = cache_provider
         self.match_rule = Rule(match_rule)
         
     def __call__(self, data):
         cache = self.cache_provider() if callable(self.cache_provider) else self.cache_provider
-        if not cache:
-            return data
-            
-        result = {}
-        iterable = data.items() if isinstance(data, dict) else data
+        
+        iterable = _ensure_iterable(data)
         for item in iterable:
-            k, v = item if isinstance(data, dict) else (None, item)
-            live_key = k if k is not None else v.get('rel_path') # Fallback heuristics
-            
+            # item is usually (live_key, props)
+            if not isinstance(item, tuple) or len(item) != 2:
+                yield item
+                continue
+                
+            live_key, v = item
+            if not cache:
+                yield item
+                continue
+                
             cached_val = cache.get(live_key)
             if cached_val and self.match_rule((v, cached_val)):
-                # Cache hit! Merge live dynamic path but keep heavy cached props (like hashes)
                 new_v = dict(cached_val)
                 new_v['full_path'] = v['full_path']
-                result[live_key] = new_v
+                yield (live_key, new_v)
             else:
-                result[live_key] = v
-                
-        return result
+                yield item
 
 class UnrollTree(Combinator):
     """The Hierarchical Flattener. Walks a nested tree and yields a flat stream of items."""
@@ -302,7 +321,6 @@ class UnrollTree(Combinator):
     def __call__(self, tree):
         import sys
         db_items = self.db_provider() if callable(self.db_provider) else (self.db_provider or {})
-        items_map = {}
         
         def traverse(node, current_path_parts):
             for base_name, child_node in node.items():
@@ -315,35 +333,34 @@ class UnrollTree(Combinator):
                         relative_path = "\\".join(new_path_parts)
                         
                     if db_items and db_key in db_items:
-                        items_map[relative_path] = db_items[db_key]
+                        yield (relative_path, db_items[db_key])
                     else:
-                        items_map[relative_path] = child_node
+                        yield (relative_path, child_node)
                         
                 if self.children_key in child_node:
-                    traverse(child_node[self.children_key], new_path_parts)
+                    yield from traverse(child_node[self.children_key], new_path_parts)
                     
-        traverse(tree, [])
-        return items_map
+        yield from traverse(tree, [])
 
 # ==========================================
 # TIER 2: Context & I/O
 # ==========================================
 
 class Load(Combinator):
-    """JSON IO: Reads a noun from a JSON file."""
+    """JSON IO: Reads a noun from a JSON file. Now yields items lazily where possible."""
     def __init__(self, filepath, noun=None, default_val=None):
         self.filepath = filepath
         self.noun = noun
         self.default_val = default_val if default_val is not None else {}
         
-    def __call__(self, data=None): # data is ignored here, acting as a Source
+    def __call__(self, data=None): 
         if not self.filepath or not os.path.exists(self.filepath):
             return self.default_val
         try:
+            # We use standard json.load for now but this can be swapped with ijson for true OOM safety
             with open(self.filepath, 'r', encoding='utf-8') as f:
                 content = json.load(f)
             if self.noun:
-                # Support nested nouns like "database.items"
                 parts = self.noun.split('.')
                 curr = content
                 for p in parts:
@@ -354,13 +371,27 @@ class Load(Combinator):
             return self.default_val
 
 class Dump(Combinator):
-    """JSON IO: Writes a noun stream to a JSON file."""
+    """JSON IO: Writes a noun stream to a JSON file. Materializes the stream."""
     def __init__(self, filepath, noun=None):
         self.filepath = filepath
         self.noun = noun
         
     def __call__(self, data):
-        # If the file exists, we load it first to merge/update
+        # Materialize the generator into a dict or list for JSON dumping
+        if hasattr(data, '__iter__') and not isinstance(data, (dict, list, str)):
+            # Peek at the first item to determine if it's a KV stream or a list stream
+            iterator = iter(data)
+            try:
+                first = next(iterator)
+                if isinstance(first, tuple) and len(first) == 2:
+                    import itertools
+                    data = dict(itertools.chain([first], iterator))
+                else:
+                    import itertools
+                    data = list(itertools.chain([first], iterator))
+            except StopIteration:
+                data = {}
+
         current_content = {}
         if self.filepath and os.path.exists(self.filepath):
             try:
@@ -381,20 +412,20 @@ class Dump(Combinator):
         with open(self.filepath, 'w', encoding='utf-8') as f:
             json.dump(current_content, f, indent=2)
             
-        return data # Pass-through for further pipeline steps
+        return data
 
 class ExtractValue(Combinator):
     """Helper combinator to just return the value of a dict item tuple or the whole item."""
     def __init__(self, key=None):
         self.key = key
     def __call__(self, data):
-        iterable = data.items() if isinstance(data, dict) else data
+        iterable = _ensure_iterable(data)
         if self.key:
-            return [v.get(self.key) for v in iterable if isinstance(v, dict)]
-        return [v for k, v in iterable] if isinstance(data, dict) else [v for v in iterable]
+            return (v.get(self.key) for x in iterable for v in [x[1] if isinstance(x, tuple) else x] if isinstance(v, dict))
+        return (x[1] if isinstance(x, tuple) and len(x) == 2 else x for x in iterable)
 
 class BuildTree(Combinator):
-    """The Hierarchical Grouper. Converts a flat stream of aliased files into a nested folder tree."""
+    """The Hierarchical Grouper. Converts a flat stream into a nested folder tree. (Stateful)."""
     def __init__(self, key_selector):
         self.key_selector = Rule(key_selector)
         
@@ -402,11 +433,15 @@ class BuildTree(Combinator):
         tree_root = {}
         nodes = {}
         
+        iterable = _ensure_iterable(items_map)
+        
         # Pass 1: Create nodes
-        for item in items_map.values() if isinstance(items_map, dict) else items_map:
-            rel_path = self.key_selector(item, 'rel_path')
-            dbref = self.key_selector(item, 'dbref')
-            type_val = self.key_selector(item, 'type')
+        for item in iterable:
+            val = item[1] if isinstance(item, tuple) and len(item) == 2 else item
+            
+            rel_path = self.key_selector(val, 'rel_path')
+            dbref = self.key_selector(val, 'dbref')
+            type_val = self.key_selector(val, 'type')
             
             node = {"dbref": dbref}
             if type_val == 'directory':
@@ -419,7 +454,6 @@ class BuildTree(Combinator):
             parent_rel = str(path_obj.parent)
             base_name = path_obj.name
             
-            # Root items have parent '.' in posix, or parent == rel_path if it's already a root base name
             if parent_rel == '.' or parent_rel == rel_path:
                 tree_root[base_name] = node
             elif parent_rel in nodes:
@@ -429,34 +463,47 @@ class BuildTree(Combinator):
         return tree_root
 
 class FS_Scan(Combinator):
-    """Physical Crawler: Yields normalized file properties from the physical drive."""
+    """Physical Crawler: Yields normalized file properties lazily using os.scandir."""
     def __init__(self, mount_path, do_hash=False):
         self.mount_path = Path(mount_path).resolve()
         self.do_hash = do_hash
         
     def __call__(self, data=None):
-        result = {}
         if not self.mount_path.is_dir():
-            return result
+            return
             
-        for item in self.mount_path.rglob('*'):
+        def _scan(directory, rel_base):
             try:
-                stat_info = item.stat()
-                rel_path = str(item.relative_to(self.mount_path))
-                props = {
-                    'type': 'file' if item.is_file() else 'directory' if item.is_dir() else 'unknown',
-                    'full_path': str(item.resolve()),
-                    'base_name': item.name,
-                    'modified_timestamp': stat_info.st_mtime,
-                    'size': stat_info.st_size
-                }
-                if props['type'] == 'file' and self.do_hash:
-                    hasher = hashlib.sha256()
-                    with open(item, 'rb') as f:
-                        while chunk := f.read(8192):
-                            hasher.update(chunk)
-                    props['sha256'] = hasher.hexdigest()
-                result[rel_path] = props
-            except Exception:
-                continue
-        return result
+                with os.scandir(directory) as it:
+                    for entry in it:
+                        rel_path = os.path.join(rel_base, entry.name) if rel_base else entry.name
+                        try:
+                            stat_info = entry.stat()
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                            is_file = entry.is_file(follow_symlinks=False)
+                            
+                            props = {
+                                'type': 'file' if is_file else 'directory' if is_dir else 'unknown',
+                                'full_path': str(Path(entry.path).resolve()),
+                                'base_name': entry.name,
+                                'modified_timestamp': stat_info.st_mtime,
+                                'size': stat_info.st_size
+                            }
+                            
+                            if is_file and self.do_hash:
+                                hasher = hashlib.sha256()
+                                with open(entry.path, 'rb') as f:
+                                    while chunk := f.read(8192):
+                                        hasher.update(chunk)
+                                    props['sha256'] = hasher.hexdigest()
+                                    
+                            yield (rel_path, props)
+                            
+                            if is_dir:
+                                yield from _scan(entry.path, rel_path)
+                        except Exception:
+                            continue
+            except PermissionError:
+                pass
+                
+        yield from _scan(self.mount_path, "")

@@ -41,6 +41,8 @@ def run_prune_verb(args):
 def query_pipeline(args):
     """
     Generated LLM Monad for Querying Files
+    PDM Pipeline: Stream[Load] -> Filter(is_file) -> Filter(match_ext) -> Filter(size_gt)
+    Translated to native Python generators (Lazy) per lang_python.md.
     """
     def multi_file_loader(initial):
         matched = {}
