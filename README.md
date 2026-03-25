@@ -48,7 +48,7 @@ The project uses a **Combinator-based architecture**. You can easily add new Nou
 
 ### Example: Custom Pipeline
 ```python
-from dcomp.combinators import Stream, Load
+from dcomplib.combinators import Stream, Load
 
 # Chain operations using the Fluent API
 results = (Stream(Load("cache.json", "database.items"))
@@ -57,7 +57,7 @@ results = (Stream(Load("cache.json", "database.items"))
            .execute())
 ```
 
-See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details and [doc/CONTRIBUTING.md](doc/CONTRIBUTING.md) for a guide on how to add new Nouns and Verbs.
+See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details and [doc/CONTRIBUTING.md](doc/CONTRIBUTING.md) for a guide on how to add new Nouns and Verbs. For comprehensive design rules regarding folder structure and CLI naming conventions, read the [Architecture Guidelines](.gemini/skills/pdm-meta-housekeeping/references/fs_architecture_guidelines.md).
 
 ## Command Overview (Noun-First)
 
@@ -75,7 +75,7 @@ See [doc/PRD_COMBINATORS.md](doc/PRD_COMBINATORS.md) for architectural details a
 The system state is managed through a typed `ScanContext` object, replacing old, deeply-nested dictionaries with discoverable, IDE-friendly properties.
 
 ### Modular CLI
-Each noun in `dcomp/nouns/` is a plugin that defines its own CLI verbs, making the system highly extensible.
+Each noun in `domains/` is a domain module that defines its own CLI verbs, making the system highly extensible.
 
 ---
 

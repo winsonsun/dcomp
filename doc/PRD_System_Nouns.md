@@ -12,7 +12,7 @@ This document outlines two architectural approaches to managing system-level nou
 **Philosophy**: The core execution path (`scan`, `diff`, `sync`) is sacred, explicit, and hardcoded. System nouns (`files`, `paths`) only participate in dynamic injection when they need to provide cross-cutting, optional features.
 
 ### Description
-In this model, `dcomp/modes.py` explicitly defines the crucial steps of the pipeline (e.g., `FS_Scan -> Map(alias) -> BuildTree`). The dynamic Policy Compiler (`dcomp.policy.get_rules`) is used as an *extension slot* between these fixed steps. 
+In this model, `dcomplib/modes.py` explicitly defines the crucial steps of the pipeline (e.g., `FS_Scan -> Map(alias) -> BuildTree`). The dynamic Policy Compiler (`dcomplib.policy.get_rules`) is used as an *extension slot* between these fixed steps. 
 
 Internal nouns are primarily used for their schema definitions, validation logic, and CLI handlers. If an internal noun (e.g., `files`) needs to add a feature like "reject temporary files," it implements the `get_rules(phase='pre_scan')` method to inject a Combinator into the fixed pipeline.
 
@@ -33,7 +33,7 @@ Internal nouns are primarily used for their schema definitions, validation logic
 
 ## Approach B: The Complete Rewrite (Microkernel Model)
 
-**Philosophy**: *Everything* is a plugin. The core `dcomp.py` program is nothing more than an empty message bus and a CLI router.
+**Philosophy**: *Everything* is a plugin. The core `dcomp_cli.py` program is nothing more than an empty message bus and a CLI router.
 
 ### Description
 In this model, there is no hardcoded pipeline in `modes.py`. The `scan` mode simply queries the Policy Engine: "Give me all steps for the `scan` phase."
@@ -53,8 +53,8 @@ System nouns like `fs` (filesystem), `paths` (tokenization), and `database` woul
 * **Overhead**: The system spends significant startup time compiling, sorting, and validating the pipeline.
 
 ### Implementation Guide
-1. Delete `dcomp/modes.py` execution logic.
-2. Upgrade `dcomp/policy.py` to support strict priority ordering (e.g., `get_rules(phase='scan_pipeline') -> List[Tuple[int, Rule]]`).
+1. Delete `dcomplib/modes.py` execution logic.
+2. Upgrade `dcomplib/policy.py` to support strict priority ordering (e.g., `get_rules(phase='scan_pipeline') -> List[Tuple[int, Rule]]`).
 3. Rewrite all foundational logic (`FS_Scan`, `BuildTree`) as rules provided by the core internal nouns.
 4. Implement a robust topological sort in the Policy Engine to handle dependencies between noun operations.
 

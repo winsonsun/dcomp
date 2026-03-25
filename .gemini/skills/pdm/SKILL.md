@@ -15,6 +15,15 @@ You are an expert in the Composable Facets (Sunflower) Architecture of the Proce
 
 When a user asks to map out an architecture, analyze a data pipeline, or understand the lifecycle of a specific data store or entity, you must generate a PDM matrix using this DSL.
 
+## 0. Initialization: The Dynamic Router
+*Note: This skill acts as a JIT (Just-In-Time) router.*
+
+**Mandatory First Step:**
+1.  Read the project profile configuration using `read_file(".gemini/pdm_profile.json")`.
+2.  Parse the `pdm_common` object and `read_file()` the `glossary` and `live_cell_workflow` facets to ensure accurate terminology comprehension and execution lifecycle compliance.
+3.  Parse the `pdm` object in the JSON file (if present) to load any specific rules.
+4.  Execute the requested mapping task according to the Live Cell Phase 1 (Diagnostics) workflow.
+
 ## Core Rules for PDM Generation
 
 1. **Matrix Structure:** Always use standard GitHub-Flavored Markdown tables.

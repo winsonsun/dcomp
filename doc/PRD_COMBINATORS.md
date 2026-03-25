@@ -41,7 +41,7 @@ To make the DSL more accessible and readable, especially for entry-level develop
 
 ### Example: Finding large video files
 ```python
-from dcomp.combinators import Stream, Load
+from dcomplib.combinators import Stream, Load
 
 # procedural style (Old)
 pipeline = Pipeline([
@@ -66,7 +66,7 @@ results = (Stream(Load("cache.json", "database.items"))
 All new combinators should inherit from the `Combinator` base class. This automatically grants them access to the fluent API methods (`filter`, `map`, etc.).
 
 ```python
-from dcomp.combinators import Combinator, Rule
+from dcomplib.combinators import Combinator, Rule
 
 class MyNewCombinator(Combinator):
     def __init__(self, rule):

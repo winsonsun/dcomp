@@ -20,14 +20,15 @@ When a user asks to implement a new feature, script, or data pipeline, you MUST 
 **Mandatory First Step:**
 1.  Read the project profile configuration using `read_file(".gemini/pdm_profile.json")`.
 2.  Parse the `system` object to locate the `evolution_log`. Read `read_file(system.evolution_log)` to understand any historical constraints, failed designs, or deprecated rules that must override your baseline governance.
-3.  Parse the `pdm_common` object and `read_file(pdm_common.glossary)` to load the universal terminology definitions.
+3.  Parse the `pdm_common` object and `read_file()` the `glossary` and `live_cell_workflow` facets to load the universal terminology and execution lifecycle compliance rules.
 4.  Parse the `pdm_arch` object in the JSON file.
 5.  Use `read_file()` to load each of the specified `.md` files into your context:
     - The `core_paradigm` defines the structural physics of the project.
     - The `memory_interface` dictates how architectural tags are saved and retrieved.
     - The `governance_policy` dictates how code is promoted to the core.
 6.  **JIT Capability Routing:** Review the `pdm_arch.extended_facets` object. If the user's intent implies a specific capability (e.g., distributed -> `topology`, parallel -> `concurrency`), use `read_file()` to JIT-load the appropriate facet before designing the architecture.
-7.  Synthesize these loaded modules to evaluate the user's architectural request.
+7.  **Meta-Evolution Routing:** If the user request involves modifying, refactoring, or evolving the `pdm*` skills or the prompt ecosystem itself, `read_file(system.meta_framework)` to load the Top-Level Architectural Principles. Do NOT load this for standard target system tasks (e.g., `dcomp_cli` or `combinate.py`).
+8.  Synthesize these loaded modules to evaluate the user's architectural request.
 
 ## 5. The Paradigm Extensions: Foundational Architectural Styles (Lazy-Loaded Theory)
 *Note: This is an extendable library of "Physics Engines". When encountering a style tag below on a Noun or Verb, you MUST use the `read_file` tool to ingest its specific constraints BEFORE designing the pipeline.*

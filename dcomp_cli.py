@@ -31,9 +31,9 @@ import importlib
 
 # Local I/O utilities (atomic write, logging setup)
 from io_utils import atomic_write_json, setup_basic_logging
-from dcomp.context import ScanContext
+from dcomplib.context import ScanContext
 
-from dcomp.legacy_utils import *
+from dcomplib.legacy_utils import *
 def apply_working_dir(args_dict, working_dir):
     """
     Prepends the working_dir to any relative file path arguments.
@@ -102,11 +102,11 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Operation Mode")
     
     # --- DYNAMIC NOUN & WORKFLOW DISCOVERY ---
-    from dcomp.registry import register_all_nouns
-    domains = register_all_nouns(subparsers, dev_nouns={'plugin'})
+    from dcomplib.registry import register_all_nouns
+    domains = register_all_nouns(subparsers, dev_nouns={'domain'})
 
     # --- TRAIT: Cmdcliable MOUNTING ---
-    from dcomp.contracts import Cmdcliable
+    from dcomplib.contracts import Cmdcliable
     # The orchestrator asks the discovered domains if they want to mount their own CLI workflows.
     for domain_module in domains:
         if isinstance(domain_module, Cmdcliable):

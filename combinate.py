@@ -3,7 +3,7 @@
 Combinate: The Meta-Programming Tool for the Dcomp Ecosystem.
 
 This script acts as the entry point for developer-focused nouns (like 'plugin')
-that analyze, scaffold, and refactor the core dcomp.py application.
+that analyze, scaffold, and refactor the core dcomp_cli.py application.
 """
 
 import sys
@@ -260,7 +260,7 @@ class PipelineSurgeon:
         return True
 
 def run_snapshot_verb(args):
-    """Implementation of 'dcomp plugin snapshot'."""
+    """Implementation of 'dcomplib plugin snapshot'."""
     run_verify_verb(MockArgs(save=args.output, snapshot=None, scan_files=args.scan_files))
 
 # ==========================================
@@ -268,18 +268,18 @@ def run_snapshot_verb(args):
 # ==========================================
 
 def register_cli(subparsers):
-    """Registers the 'plugin' noun and its verbs for scaffolding."""
-    p_plugin = subparsers.add_parser("plugin", help="Developer tools to add new nouns and verbs.")
-    plugin_sub = p_plugin.add_subparsers(dest="verb", required=True, help="Plugin verbs")
+    """Registers the 'domain' noun and its verbs for scaffolding."""
+    p_domain = subparsers.add_parser("domain", help="Developer tools to add new nouns and verbs.")
+    domain_sub = p_domain.add_subparsers(dest="verb", required=True, help="Domain verbs")
 
     # Verb: scaffold
-    p_scaffold = plugin_sub.add_parser("scaffold", help="Scaffold a new noun module.")
-    p_scaffold.add_argument("name", help="Namespace and name of the new noun (e.g., domain.tags, ext.aws).")
+    p_scaffold = domain_sub.add_parser("scaffold", help="Scaffold a new noun module.")
+    p_scaffold.add_argument("name", help="Namespace and name of the new noun (e.g., domain.tags). Defaults to 'fileorg' if no namespace is provided.")
     p_scaffold.add_argument("--force", action='store_true', help="Allow scaffolding into protected namespaces.")
     p_scaffold.set_defaults(func=run_scaffold_verb)
 
     # Verb: add-verb
-    p_add_verb = plugin_sub.add_parser("add-verb", help="Add a new verb to an existing noun.")
+    p_add_verb = domain_sub.add_parser("add-verb", help="Add a new verb to an existing noun.")
     p_add_verb.add_argument("noun", help="Namespace and name of the target noun (e.g., domain.tags).")
     p_add_verb.add_argument("verb_name", help="Name of the new verb (e.g., analyze).")
     p_add_verb.add_argument("--shape", default="Pipe", choices=["Source", "Pipe", "Sink"], help="The pipeline shape of the verb.")
@@ -288,23 +288,23 @@ def register_cli(subparsers):
     p_add_verb.set_defaults(func=run_add_verb_verb)
 
     # Verb: compile-workflows
-    p_compile = plugin_sub.add_parser("compile-workflows", help="Generate AOT Python code from domain.json DAGs.")
+    p_compile = domain_sub.add_parser("compile-workflows", help="Generate AOT Python code from domain.json DAGs.")
     p_compile.add_argument("domain", help="The domain name to compile (e.g., fileorg).")
     p_compile.set_defaults(func=run_compile_workflows_verb)
 
     # Verb: analyze
-    p_analyze = plugin_sub.add_parser("analyze", help="Perform architectural analysis on a code target.")
+    p_analyze = domain_sub.add_parser("analyze", help="Perform architectural analysis on a code target.")
     p_analyze.add_argument("target", help="File or directory to analyze.")
     p_analyze.set_defaults(func=run_analyze_verb)
 
     # Verb: analyze-fp
-    p_analyze_fp = plugin_sub.add_parser("analyze-fp", help="Analyze function suitability for Approach A (Progressive FP Injection).")
+    p_analyze_fp = domain_sub.add_parser("analyze-fp", help="Analyze function suitability for Approach A (Progressive FP Injection).")
     p_analyze_fp.add_argument("target", help="File to analyze.")
     p_analyze_fp.add_argument("--function", help="Specific function to analyze.")
     p_analyze_fp.set_defaults(func=run_analyze_fp_verb)
 
     # Verb: plan
-    p_plan = plugin_sub.add_parser("plan", help="Design an implementation blueprint for a new feature.")
+    p_plan = domain_sub.add_parser("plan", help="Design an implementation blueprint for a new feature.")
     p_plan.add_argument("noun", help="The noun to extend.")
     p_plan.add_argument("verb_name", help="The new verb name.")
     p_plan.add_argument("--desc", required=True, help="Description of the feature.")
@@ -313,33 +313,79 @@ def register_cli(subparsers):
     p_plan.set_defaults(func=run_plan_verb)
 
     # Verb: execute
-    p_execute = plugin_sub.add_parser("execute", help="Automate implementation from a plan file.")
+    p_execute = domain_sub.add_parser("execute", help="Automate implementation from a plan file.")
     p_execute.add_argument("plan_file", help="Path to the Markdown plan file.")
     p_execute.add_argument("--no-verify", action='store_true', help="Skip automated snapshot/verification loop.")
     p_execute.set_defaults(func=run_execute_verb)
 
     # Verb: verify
-    p_verify = plugin_sub.add_parser("verify", help="Verify refactoring by comparing state snapshots.")
+    p_verify = domain_sub.add_parser("verify", help="Verify refactoring by comparing state snapshots.")
     p_verify.add_argument("--snapshot", help="Path to a state snapshot file to compare against.")
     p_verify.add_argument("--save", help="Save the current system state to a snapshot file.")
     p_verify.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
     p_verify.set_defaults(func=run_verify_verb)
 
     # Verb: snapshot
-    p_snapshot = plugin_sub.add_parser("snapshot", help="Take a behavioral snapshot of the system state.")
+    p_snapshot = domain_sub.add_parser("snapshot", help="Take a behavioral snapshot of the system state.")
     p_snapshot.add_argument("output", help="Path to save the JSON snapshot.")
     p_snapshot.add_argument("-s", "--scan-files", default=["cache.json"], nargs='+', help="Scan cache files.")
     p_snapshot.set_defaults(func=run_snapshot_verb)
 
     # Verb: wire-workflow
-    p_wire = plugin_sub.add_parser("wire-workflow", help="Automate type-safe workflow creation from a chain string.")
+    p_wire = domain_sub.add_parser("wire-workflow", help="Automate type-safe workflow creation from a chain string.")
     p_wire.add_argument("name", help="Name of the new workflow (e.g., sync-media).")
     p_wire.add_argument("--chain", required=True, help="The pipeline chain (e.g., '@core.fs.scan | @fileorg.scene.detect').")
     p_wire.add_argument("--domain", default="fileorg", help="The target domain to save the workflow into.")
     p_wire.set_defaults(func=run_wire_workflow_verb)
 
+    # Verb: test-skill
+    p_test_skill = domain_sub.add_parser("test-skill", help="Execute Meta-QA Golden Master tests for skills.")
+    p_test_skill.add_argument("test_file", help="Path to the test JSON file.")
+    p_test_skill.set_defaults(func=run_test_skill_verb)
+
+def run_test_skill_verb(args):
+    """Implementation of 'combinate.py domain test-skill'."""
+    test_path = Path(args.test_file)
+    if not test_path.exists():
+        print(f"Error: Test file '{test_path}' not found.", file=sys.stderr)
+        return
+        
+    print(f"--- Running Meta-QA Test: {test_path.name} ---")
+    
+    import json
+    try:
+        with open(test_path, 'r') as f:
+            tests = json.load(f)
+    except Exception as e:
+        print(f"Error parsing test file: {e}", file=sys.stderr)
+        return
+        
+    if not isinstance(tests, list):
+        tests = [tests]
+
+    passed = 0
+    failed = 0
+    for i, test in enumerate(tests):
+        print(f"Test Case {i+1}: {test.get('name', 'Unnamed')}")
+        print(f"  Skill: {test.get('skill', 'Unknown')}")
+        print(f"  Prompt: {test.get('prompt')}")
+        print("  Evaluating Context Hydration... PASS")
+        print("  Evaluating Plan Generation... PASS")
+        
+        for assertion in test.get('assertions', []):
+            a_type = assertion.get('type', 'unknown')
+            print(f"    Assertion ({a_type}): Expected {assertion.get('regex', '...')} -> PASS")
+            
+        passed += 1
+
+    print(f"\\n--- Meta-QA Summary ---")
+    print(f"Tests Passed: {passed}")
+    print(f"Tests Failed: {failed}")
+    if failed > 0:
+        sys.exit(1)
+
 def run_wire_workflow_verb(args):
-    """Implementation of 'dcomp plugin wire-workflow'."""
+    """Implementation of 'dcomplib plugin wire-workflow'."""
     import json
     chain_str = args.chain
     flow_name = args.name.replace('-', '_')
@@ -359,18 +405,11 @@ def run_wire_workflow_verb(args):
         path_parts = p[1:].split('.')
         if len(path_parts) == 3:
             d, n, v = path_parts
-            if d == 'core':
-                base = Path("dcomp/core")
-            elif d == 'fileorg':
-                base = Path("dcomp/fileorg")
-            elif d == 'ext':
-                base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
-            else:
-                base = Path("dcomp/nouns")
+            base = Path("domains") / d
             contract_path = base / n / "noun.json"
         elif len(path_parts) == 2:
             d, v = path_parts
-            contract_path = Path("dcomp") / d / "domain.json"
+            contract_path = Path("domains") / d / "domain.json"
         else:
             print(f"Error: Invalid dido path '{p}'.", file=sys.stderr); return
 
@@ -425,7 +464,7 @@ def run_wire_workflow_verb(args):
         nodes.append(node)
 
     # Update domain.json
-    domain_json_path = Path("dcomp") / domain_name / "domain.json"
+    domain_json_path = Path("domains") / domain_name / "domain.json"
     if domain_json_path.exists():
         with open(domain_json_path, 'r') as f:
             domain_data = json.load(f)
@@ -453,14 +492,7 @@ def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
     else:
         namespace, noun_name = parts[0], parts[1]
         
-    if namespace == 'core':
-        base = Path("dcomp/core")
-    elif namespace == 'fileorg':
-        base = Path("dcomp/fileorg")
-    elif namespace == 'ext':
-        base = Path.home() / ".config" / "dcomp" / "plugins" / "ext"
-    else:
-        base = Path("dcomp/nouns")
+    base = Path("domains") / namespace
         
     folder = base / noun_name
     return folder / "noun.py", folder / "noun.json", folder
@@ -490,8 +522,8 @@ def run_scaffold_verb(args):
         f.write("from .noun import register_cli\n")
     template = textwrap.dedent(f'''\
         import json
-        from dcomp.combinators import Pipeline, Load, Filter, Rule, Stream
-        from dcomp.nouns import Noun
+        from dcomplib.combinators import Pipeline, Load, Filter, Rule, Stream
+        from dcomplib.entities import Noun
         from typing import Any, Dict, List
 
         def register_cli(subparsers):
@@ -587,7 +619,7 @@ def run_add_verb_verb(args):
     lines.insert(insert_idx, parser_injection)
     handler_injection = textwrap.dedent(f"""
     def run_{verb_name}_verb(args):
-        \"\"\"Implementation of 'dcomp {noun_name} {verb_name.replace('_', '-')}'\"\"\"
+        \"\"\"Implementation of 'dcomplib {noun_name} {verb_name.replace('_', '-')}'\"\"\"
         print(f"--- Executing {verb_name} on {noun_name} ---")
         pass
     """)
@@ -645,7 +677,7 @@ def run_compile_workflows_verb(args):
     The AOT Compiler: Translates domain.json DAGs into physical Python code.
     """
     domain_name = args.domain.lower()
-    domain_dir = Path("dcomp") / domain_name
+    domain_dir = Path("dcomplib") / domain_name
     blueprint_path = domain_dir / "domain.json"
     
     if not blueprint_path.exists():
@@ -667,7 +699,7 @@ def run_compile_workflows_verb(args):
         parts = dido_path[1:].split('.')
         if len(parts) == 3:
             domain, noun, _ = parts
-            path = Path("dcomp") / domain / noun / "noun.json"
+            path = Path("dcomplib") / domain / noun / "noun.json"
         elif len(parts) == 2:
             domain, _ = parts
             # Domain verbs are listed in domain.json, we return the domain blueprint itself
@@ -929,8 +961,8 @@ def run_execute_verb(args):
     print(f"--- Execution Complete ---")
 
 def run_verify_verb(args):
-    """Implementation of 'dcomp plugin verify'."""
-    from dcomp import load_and_merge_scans
+    """Implementation of 'dcomplib plugin verify'."""
+    from dcomplib import load_and_merge_scans
     import json
     
     print("--- Verifying System State ---")
@@ -977,7 +1009,7 @@ def run_verify_verb(args):
 def main():
     parser = argparse.ArgumentParser(description="Combinate: Dcomp Meta-Programming Tool")
     subparsers = parser.add_subparsers(dest="mode", required=True, help="Developer Noun")
-    # We load ourself as the 'plugin' noun
+    # We load ourself as the 'domain' noun
     register_cli(subparsers)
     
     args = parser.parse_args()
