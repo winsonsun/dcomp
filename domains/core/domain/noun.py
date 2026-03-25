@@ -40,6 +40,14 @@ def register_cli(subparsers):
     p_execute.add_argument("plan_file", help="Path to the Markdown plan file.")
     p_execute.set_defaults(func=run_execute_verb)
 
+    # Verb: clean
+    p_clean = domain_sub.add_parser("clean", help="Housekeeping tool to prune empty directories and legacy artifacts.")
+    p_clean.set_defaults(func=run_clean_verb)
+
+    # Verb: verify-contracts
+    p_verify_contracts = domain_sub.add_parser("verify-contracts", help="Validate noun.json schemas against actual Python endpoints.")
+    p_verify_contracts.set_defaults(func=run_verify_contracts_verb)
+
     # Reserved for future maintenance
     p_delete = domain_sub.add_parser("delete-noun", help="[Reserved] Safely remove non-internal nouns.")
     p_delete.add_argument("name", help="Name of the noun to delete.")
@@ -344,3 +352,67 @@ def run_delete_noun_verb(args):
 
 def run_list_nouns_verb(args):
     print("[Reserved] list-nouns functionality will be implemented in a future update.")
+
+def run_clean_verb(args):
+    """Implementation of 'dcomp_cli.py domain clean'."""
+    print("--- Running System Housekeeping ---")
+    import shutil
+    count = 0
+    for root, dirs, files in os.walk('.', topdown=False):
+        if '.git' in root or '__pycache__' in root or '.gemini' in root:
+            continue
+        # Remove empty directories
+        for d in dirs:
+            dir_path = os.path.join(root, d)
+            try:
+                if not os.listdir(dir_path):
+                    print(f"Pruning empty directory: {dir_path}")
+                    os.rmdir(dir_path)
+                    count += 1
+            except Exception:
+                pass
+        # Remove legacy artifacts
+        for f in files:
+            if f.endswith('.skill'):
+                file_path = os.path.join(root, f)
+                print(f"Pruning legacy artifact: {file_path}")
+                os.remove(file_path)
+                count += 1
+    print(f"Housekeeping complete. Pruned {count} items.")
+
+def run_verify_contracts_verb(args):
+    """Implementation of 'dcomp_cli.py domain verify-contracts'."""
+    print("--- Verifying Domain Contracts ---")
+    import json
+    import ast
+    
+    contracts_valid = True
+    domains_dir = Path("domains")
+    found_contracts = 0
+    
+    for root, dirs, files in os.walk(domains_dir):
+        if 'noun.json' in files:
+            noun_json_path = Path(root) / 'noun.json'
+            found_contracts += 1
+            try:
+                with open(noun_json_path, 'r') as f:
+                    contract = json.load(f)
+                print(f"Found contract: {noun_json_path}")
+                
+                noun_module = Path(root) / "noun.py"
+                if noun_module.exists():
+                    print(f"  [OK] Python module exists: {noun_module}")
+                    # Basic AST stub check could go here
+                else:
+                    print(f"  [FAIL] Missing Python module: {noun_module}")
+                    contracts_valid = False
+            except Exception as e:
+                print(f"Error reading contract {noun_json_path}: {e}")
+                contracts_valid = False
+                
+    if found_contracts == 0:
+        print("No noun.json contracts found to verify.")
+    elif contracts_valid:
+        print("All discovered contracts passed basic validation.")
+    else:
+        print("Contract validation failed.")

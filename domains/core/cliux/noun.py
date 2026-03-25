@@ -3,14 +3,14 @@ import sys
 import importlib
 import logging
 
-def _resolve_dido(dido_path: str):
+def _resolve_capability(capability_path: str):
     """
     Resolves a string like '@fileorg.scene.detect_scenes' into a callable python function.
     """
-    if not dido_path.startswith('@'):
-        raise ValueError(f"Invalid dido format '{dido_path}'. Must start with '@'.")
+    if not capability_path.startswith('@'):
+        raise ValueError(f"Invalid capability format '{capability_path}'. Must start with '@'.")
         
-    path_parts = dido_path[1:].split('.')
+    path_parts = capability_path[1:].split('.')
     func_name = path_parts[-1]
     # For now, assume the module structure maps to dcomplib.<domain>.<noun>.noun
     # e.g., @fileorg.scene.detect -> domains.fileorg.scene.noun.detect
@@ -34,30 +34,30 @@ def _resolve_dido(dido_path: str):
              raise AttributeError(f"Dido '{func_name}' not found in module '{module_path}'")
         return getattr(module, func_name)
     except ImportError as e:
-        raise ImportError(f"Failed to load dido module '{module_path}': {e}")
+        raise ImportError(f"Failed to load capability module '{module_path}': {e}")
 
-def _create_command_handler(dido_path: str):
-    """Creates a closure that invokes the target pure capability (dido)."""
+def _create_command_handler(capability_path: str):
+    """Creates a closure that invokes the target pure capability (capability)."""
     def handler(args):
         try:
-            dido_func = _resolve_dido(dido_path)
+            capability_func = _resolve_capability(capability_path)
             # The cliux layer is responsible for converting the argparse Namespace
             # into pure python kwargs, insulating the domain from the CLI structure.
             kwargs = vars(args)
-            return dido_func(kwargs) # Temporary: pass args dict directly while migrating
+            return capability_func(kwargs) # Temporary: pass args dict directly while migrating
         except Exception as e:
-            print(f"CLIUX Execution Error [{dido_path}]: {e}", file=sys.stderr)
+            print(f"CLIUX Execution Error [{capability_path}]: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc()
             sys.exit(1)
     return handler
 
 def _load_all_contracts():
-    """Generator yielding every noun.json contract in the ecosystem."""
+    """Generator yielding every contract.json contract in the ecosystem."""
     from pathlib import Path
     import json
     base_dir = Path("dcomplib")
-    for json_path in base_dir.rglob("noun.json"):
+    for json_path in base_dir.rglob("contract.json"):
         try:
             with open(json_path, 'r') as f:
                 yield json.load(f)
@@ -67,7 +67,7 @@ def _load_all_contracts():
 def discover_cli_nouns(provides_context: list):
     """
     An FP-style discovery pipeline.
-    Filters the contract stream by cli_commands presence and inversed_dido fulfillment.
+    Filters the contract stream by cli_commands presence and dependency fulfillment.
     """
     from dcomplib.combinators import Pipeline, Filter, Rule, Map
     
@@ -77,7 +77,7 @@ def discover_cli_nouns(provides_context: list):
         return "cli_commands" in contract and contract["cli_commands"].get("groups")
 
     def satisfies_inversed(contract):
-        needs = set(contract.get("inversed_didos", []))
+        needs = set(contract.get("dependencys", []))
         # If the noun needs something the domain doesn't provide, filter it out.
         return needs.issubset(provides_set)
 
@@ -99,7 +99,7 @@ def discover_cli_nouns(provides_context: list):
 def mount_domain_commands(blueprint: dict, subparsers: argparse._SubParsersAction):
     """
     Reads the 'commands' block of a domain.json blueprint and dynamically
-    constructs the argparse tree, wiring them to the domain's pure didos.
+    constructs the argparse tree, wiring them to the domain's pure capabilitys.
     """
     domain_name = blueprint.get('domain', 'unknown')
     commands = blueprint.get('commands', {})

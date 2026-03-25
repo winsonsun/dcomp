@@ -406,12 +406,12 @@ def run_wire_workflow_verb(args):
         if len(path_parts) == 3:
             d, n, v = path_parts
             base = Path("domains") / d
-            contract_path = base / n / "noun.json"
+            contract_path = base / n / "contract.json"
         elif len(path_parts) == 2:
             d, v = path_parts
             contract_path = Path("domains") / d / "domain.json"
         else:
-            print(f"Error: Invalid dido path '{p}'.", file=sys.stderr); return
+            print(f"Error: Invalid capability path '{p}'.", file=sys.stderr); return
 
         if not contract_path.exists():
             print(f"Error: Contract for '{p}' not found at {contract_path}.", file=sys.stderr); return
@@ -419,7 +419,7 @@ def run_wire_workflow_verb(args):
         with open(contract_path, 'r') as f:
             contract = json.load(f)
             
-        verb_data = contract.get("didos", {}).get(v)
+        verb_data = contract.get("capabilities", {}).get(v)
         if not verb_data:
             verb_data = contract.get("workflows", {}).get(v) # Check if it's a sub-workflow
             if not verb_data:
@@ -450,7 +450,7 @@ def run_wire_workflow_verb(args):
         # 3. Create Node
         node = {
             "id": f"step_{i+1}",
-            "dido": p,
+            "capability": p,
             "inputs": {}
         }
         # Auto-wire pipeline inputs
@@ -495,7 +495,7 @@ def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
     base = Path("domains") / namespace
         
     folder = base / noun_name
-    return folder / "noun.py", folder / "noun.json", folder
+    return folder / "noun.py", folder / "contract.json", folder
 
 def run_scaffold_verb(args):
     full_name = args.name.lower()
@@ -574,7 +574,7 @@ def run_scaffold_verb(args):
             "architectural_fit": [],
             "verbs": {}
         },
-        "didos": {},
+        "capabilities": {},
         "cli_commands": {
             "groups": {}
         }
@@ -630,9 +630,9 @@ def run_add_verb_verb(args):
         try:
             with open(json_path, 'r') as f: contract = json.load(f)
         except Exception:
-            contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "didos": {}, "cli_commands": {"groups": {}}}
+            contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "capabilities": {}, "cli_commands": {"groups": {}}}
     else:
-        contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "didos": {}, "cli_commands": {"groups": {}}}
+        contract = {"namespace": full_name, "ai_ontology": {"verbs": {}}, "capabilities": {}, "cli_commands": {"groups": {}}}
         
     contract.setdefault("ai_ontology", {}).setdefault("verbs", {})[verb_name] = {
         "primary_use_case": f"Auto-generated use case for {verb_name}.",
@@ -659,7 +659,7 @@ def run_add_verb_verb(args):
         verb_config["inputs"]["incoming_stream"] = {"type": f"Stream[{data_type}]", "source": "pipeline"}
         verb_config["inputs"]["output_path"] = {"type": "string", "source": "cli_args"}
         
-    contract.setdefault("didos", {})[verb_name] = verb_config
+    contract.setdefault("capabilities", {})[verb_name] = verb_config
     
     # Register the CLI mapping
     contract.setdefault("cli_commands", {}).setdefault("groups", {})[verb_name] = {
@@ -695,11 +695,11 @@ def run_compile_workflows_verb(args):
 
     domain_context = set(blueprint.get("provides_context", []))
 
-    def _load_noun_contract(dido_path):
-        parts = dido_path[1:].split('.')
+    def _load_noun_contract(capability_path):
+        parts = capability_path[1:].split('.')
         if len(parts) == 3:
             domain, noun, _ = parts
-            path = Path("dcomplib") / domain / noun / "noun.json"
+            path = Path("dcomplib") / domain / noun / "contract.json"
         elif len(parts) == 2:
             domain, _ = parts
             # Domain verbs are listed in domain.json, we return the domain blueprint itself
@@ -711,13 +711,13 @@ def run_compile_workflows_verb(args):
             with open(path, 'r') as f: return json.load(f)
         return None
         
-    def _validate_inversed_didos(contract, dido_path, flow_id, node_id):
+    def _validate_inversed_capabilitys(contract, capability_path, flow_id, node_id):
         if not contract: return True
-        needs = set(contract.get("inversed_didos", []))
+        needs = set(contract.get("inversed_capabilitys", []))
         missing = needs - domain_context
         if missing:
             print(f"SEMANTIC CONTEXT ERROR in workflow '{flow_id}' (node '{node_id}'):", file=sys.stderr)
-            print(f"  Dido '{dido_path}' requires Inversed Didos: {list(missing)}", file=sys.stderr)
+            print(f"  Dido '{capability_path}' requires Inversed Didos: {list(missing)}", file=sys.stderr)
             print(f"  But the Active Source '{domain_name}' does not provide them.", file=sys.stderr)
             return False
         return True
@@ -744,14 +744,14 @@ def run_compile_workflows_verb(args):
         
         for node in flow_data.get("nodes", []):
             node_id = node.get("id")
-            dido_path = node.get("dido", "")
+            capability_path = node.get("capability", "")
             
-            contract = _load_noun_contract(dido_path)
-            if not _validate_inversed_didos(contract, dido_path, flow_id, node_id):
+            contract = _load_noun_contract(capability_path)
+            if not _validate_inversed_capabilitys(contract, capability_path, flow_id, node_id):
                 return
                 
             # 1. Resolve imports and function name
-            path_parts = dido_path[1:].split('.')
+            path_parts = capability_path[1:].split('.')
             if len(path_parts) == 3: # @fileorg.scene.detect
                 domain, noun, func = path_parts
                 module_path = f"scanner.{domain}.{noun}.noun"
@@ -761,8 +761,8 @@ def run_compile_workflows_verb(args):
             else:
                 continue
                 
-            output.append(f"    # Node: {node_id} ({dido_path})")
-            output.append(f"    from {module_path} import {func} as dido_{node_id}")
+            output.append(f"    # Node: {node_id} ({capability_path})")
+            output.append(f"    from {module_path} import {func} as capability_{node_id}")
             
             # 2. Build Argument string
             inputs = node.get("inputs", {})
@@ -779,10 +779,10 @@ def run_compile_workflows_verb(args):
             provides = node.get("provides")
             
             if provides:
-                output.append(f"    {provides} = dido_{node_id}({arg_str})")
+                output.append(f"    {provides} = capability_{node_id}({arg_str})")
                 available_vars.add(provides)
             else:
-                output.append(f"    dido_{node_id}({arg_str})")
+                output.append(f"    capability_{node_id}({arg_str})")
             output.append("")
 
         output.append(f"    print(f\"--- Workflow {flow_id} complete. ---\")")

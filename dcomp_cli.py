@@ -103,7 +103,7 @@ if __name__ == "__main__":
     
     # --- DYNAMIC NOUN & WORKFLOW DISCOVERY ---
     from dcomplib.registry import register_all_nouns
-    domains = register_all_nouns(subparsers, dev_nouns={'domain'})
+    domains = register_all_nouns(subparsers, dev_nouns=set())
 
     # --- TRAIT: Cmdcliable MOUNTING ---
     from dcomplib.contracts import Cmdcliable
