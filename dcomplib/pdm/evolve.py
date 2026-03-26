@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import subprocess
 from pathlib import Path
 from dcomplib.pdm.executor import PDMExecutor
@@ -24,15 +25,19 @@ class OntologyEvolver:
     def run_llm(self, prompt: str, system_prompt: str = "") -> str:
         """Lightweight wrapper to call Gemini CLI or mock for tests."""
         print(f"--- [LLM Request] ---")
+        start_time = time.time()
         try:
             # We use gemini CLI since we are inside a gemini CLI workspace
             full_prompt = f"System Instruction: {system_prompt}\n\nUser Request: {prompt}" if system_prompt else prompt
             cmd = ["gemini", "ask", full_prompt]
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            elapsed = time.time() - start_time
+            print(f"--- [LLM Request] Completed in {elapsed:.2f}s ---")
             return result.stdout.strip()
         except subprocess.CalledProcessError as e:
-            print(f"Warning: LLM Call Failed. Are you authenticated with gemini-cli? Error: {e.stderr}", file=sys.stderr)
+            elapsed = time.time() - start_time
+            print(f"Warning: LLM Call Failed after {elapsed:.2f}s. Are you authenticated with gemini-cli? Error: {e.stderr}", file=sys.stderr)
             return ""
 
     def triage(self) -> dict:
@@ -102,10 +107,10 @@ class OntologyEvolver:
         executor = PDMExecutor(handlers)
         try:
             success = executor.execute_plan(plan_path, MockArgs(no_verify=True)) # no_verify for now unless specified in plan
-            if success:
-                print("--- [Evolve] Evolution successful! ---")
+            return success
         except Exception as e:
             print(f"--- [Evolve] Evolution failed. Rolling back. Error: {e} ---", file=sys.stderr)
+            return False
         finally:
             if plan_path.exists():
                 plan_path.unlink()
@@ -124,4 +129,28 @@ def execute_evolution(prompt: str):
         print("Error: Architect failed to generate a plan.", file=sys.stderr)
         return
         
-    evolver.implement(pdm_plan)
+    success = evolver.implement(pdm_plan)
+    
+    if success:
+        print("\n--- [Evolve] Evolution successful! ---")
+        print("\nNew capabilities added:")
+        example_command = None
+        for line in pdm_plan.strip().split('\n'):
+            line = line.strip()
+            if not line: continue
+            try:
+                d = json.loads(line)
+                op = d.get('op')
+                if op == 'scaffold_noun':
+                    print(f"  - Scaffolded Domain: {d.get('target')}")
+                elif op == 'scaffold_verb':
+                    noun = d.get('noun')
+                    verb = d.get('verb')
+                    print(f"  - Added Verb: {verb} (to {noun})")
+                    if not example_command:
+                        example_command = f"python3 dcomp_cli.py {noun} {verb} --help"
+            except json.JSONDecodeError:
+                pass
+                
+        if example_command:
+            print(f"\nTry running your new command:\n  {example_command}\n")
