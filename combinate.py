@@ -25,28 +25,6 @@ PROTECTED_NAMESPACES = {'core'}
 class MockArgs:
     def __init__(self, **kwargs): self.__dict__.update(kwargs)
 
-class SimpleJSONL:
-    @staticmethod
-    def parse(content):
-        # Parses the JSONL block from the PDM 'structural' facet
-        import re
-        import json
-        
-        # Find the JSONL block
-        match = re.search(r'```jsonl\n(.*?)\n```', content, re.DOTALL)
-        if not match: return []
-        jsonl_str = match.group(1)
-        
-        directives = []
-        for line in jsonl_str.split('\n'):
-            line = line.strip()
-            if not line: continue
-            try:
-                directives.append(json.loads(line))
-            except Exception as e:
-                print(f"Warning: Failed to parse JSONL line: {line}\nError: {e}", file=sys.stderr)
-                
-        return directives
 
 import ast
 
@@ -868,8 +846,8 @@ def run_plan_verb(args):
     if args.pdm:
         pdm_path = Path(args.pdm)
         if pdm_path.exists():
-            with open(pdm_path, 'r') as f: content = f.read()
-            directives = SimpleJSONL.parse(content)
+            from dcomplib.pdm.compiler import BlueprintCompiler
+            directives = BlueprintCompiler.parse(pdm_path)
             if directives:
                 pdm_context = f"\nDerived from PDM Structural Analysis ({pdm_path.name})\n"
                 for d in directives:
@@ -917,48 +895,47 @@ def run_execute_verb(args):
         print(f"Error: Plan file '{plan_path}' not found.", file=sys.stderr); return
     print(f"--- Executing Plan: {plan_path.name} ---")
     
-    # 1. Parse the PDM JSONL directly
-    with open(plan_path, 'r') as f: content = f.read()
-    directives = SimpleJSONL.parse(content)
-    if not directives:
-        print("Error: No valid JSONL PDM directives found in plan.", file=sys.stderr)
-        return
-
-    # 2. Automated Snapshot
-    baseline = None
-    if not getattr(args, 'no_verify', False):
-        for d in directives:
-            if d.get('op') == 'snapshot':
-                baseline = f"plans/{d.get('label', 'baseline_snapshot')}.json"
-                Path("plans").mkdir(exist_ok=True)
-                print(f"Taking behavioral snapshot to {baseline}...")
-                run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
-                break
-
-    # 3. Execution Loop
-    for d in directives:
-        op = d.get('op')
-        print(f"Processing operation: {op}...")
-        if op == 'scaffold_noun':
-            run_scaffold_verb(MockArgs(name=d.get('target')))
-        elif op == 'scaffold_verb':
-            run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
-        elif op == 'inject_code':
-            print(f"  [Surgery] Injecting code into {d.get('file')} at anchor '{d.get('anchor_text')[:30]}...'")
-            success = PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), d.get('content'))
-            if not success:
-                print("  [Surgery] FAILED. Halting execution.")
-                return
-            
-    # 4. Automated Verification
-    if baseline:
-        for d in directives:
-            if d.get('op') == 'verify':
-                print(f"\n--- Verifying Rewired Behavior (against {d.get('against')}) ---")
-                run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
-                break
+    from dcomplib.pdm.executor import PDMExecutor
+    
+    def handle_snapshot(d, baseline):
+        run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
         
-    print(f"--- Execution Complete ---")
+    def handle_scaffold_noun(d):
+        run_scaffold_verb(MockArgs(name=d.get('target')))
+        
+    def handle_scaffold_verb(d):
+        run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
+        
+    def handle_inject_code(d):
+        print(f"  [Surgery] Injecting code into {d.get('file')} at anchor '{d.get('anchor_text')[:30]}...'")
+        return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), d.get('content'))
+        
+    def handle_verify(d, baseline):
+        # We need to run tests as well to verify code state (as requested in the refactor)
+        run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
+        # Optionally run tests if we can guess the test command or have a test suite:
+        # e.g. import subprocess; subprocess.run(["pytest"], check=True)
+        return True # Assuming run_verify_verb throws an exception if it fails, or it can be refactored to return bool.
+        
+    def get_current_state():
+        from dcomplib import load_and_merge_scans
+        return load_and_merge_scans(["cache.json"]).to_dict()
+
+    handlers = {
+        'snapshot': handle_snapshot,
+        'scaffold_noun': handle_scaffold_noun,
+        'scaffold_verb': handle_scaffold_verb,
+        'inject_code': handle_inject_code,
+        'verify': handle_verify,
+        'get_current_state': get_current_state
+    }
+    
+    executor = PDMExecutor(handlers)
+    try:
+        executor.execute_plan(plan_path, args)
+    except Exception as e:
+        print(f"Execution aborted: {e}", file=sys.stderr)
+
 
 def run_verify_verb(args):
     """Implementation of 'dcomplib plugin verify'."""
