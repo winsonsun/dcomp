@@ -250,6 +250,11 @@ def register_cli(subparsers):
     p_domain = subparsers.add_parser("domain", help="Developer tools to add new nouns and verbs.")
     domain_sub = p_domain.add_subparsers(dest="verb", required=True, help="Domain verbs")
 
+    # Verb: evolve
+    p_evolve = domain_sub.add_parser("evolve", help="Safely grow the CLI via Ontology-Driven Evolution.")
+    p_evolve.add_argument("prompt", help="The natural language instruction for the new feature or modification.")
+    p_evolve.set_defaults(func=run_evolve_verb)
+
     # Verb: scaffold
     p_scaffold = domain_sub.add_parser("scaffold", help="Scaffold a new noun module.")
     p_scaffold.add_argument("name", help="Namespace and name of the new noun (e.g., domain.tags). Defaults to 'fileorg' if no namespace is provided.")
@@ -474,6 +479,12 @@ def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
         
     folder = base / noun_name
     return folder / "noun.py", folder / "contract.json", folder
+
+def run_evolve_verb(args):
+    """Implementation of 'combinate domain evolve'."""
+    from dcomplib.pdm.evolve import execute_evolution
+    print(f"--- Triggering Evolution for: {args.prompt} ---")
+    execute_evolution(args.prompt)
 
 def run_scaffold_verb(args):
     full_name = args.name.lower()

@@ -1,0 +1,127 @@
+import os
+import sys
+import json
+import subprocess
+from pathlib import Path
+from dcomplib.pdm.executor import PDMExecutor
+
+class OntologyEvolver:
+    def __init__(self, prompt: str):
+        self.prompt = prompt
+
+    def get_existing_nouns(self):
+        nouns = []
+        prd_path = Path("doc/PRD_System_Nouns.md")
+        if prd_path.exists():
+            with open(prd_path, 'r') as f:
+                content = f.read()
+                # Extremely naive extraction, assuming nouns are mentioned or documented.
+                # In a real system, you'd parse this or introspect the python modules.
+                import re
+                nouns = re.findall(r'##\s+([A-Za-z0-9_]+)', content)
+        return nouns
+
+    def run_llm(self, prompt: str, system_prompt: str = "") -> str:
+        """Lightweight wrapper to call Gemini CLI or mock for tests."""
+        print(f"--- [LLM Request] ---")
+        try:
+            # We use gemini CLI since we are inside a gemini CLI workspace
+            full_prompt = f"System Instruction: {system_prompt}\n\nUser Request: {prompt}" if system_prompt else prompt
+            cmd = ["gemini", "ask", full_prompt]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            print(f"Warning: LLM Call Failed. Are you authenticated with gemini-cli? Error: {e.stderr}", file=sys.stderr)
+            return ""
+
+    def triage(self) -> dict:
+        print("--- [Evolve] Phase 1: Triage Router ---")
+        nouns = self.get_existing_nouns()
+        sys_prompt = "You are a routing agent. Decide if this prompt requires a new noun or modifying an existing noun."
+        prompt = f"Prompt: {self.prompt}\nExisting Nouns: {nouns}\n\nOutput ONLY a raw JSON object with no markdown formatting: {{\"action\": \"create_new_noun\", \"target\": \"noun_name\"}} or {{\"action\": \"modify_existing_noun\", \"target\": \"existing_noun_name\"}}"
+        
+        response = self.run_llm(prompt, sys_prompt)
+        try:
+            # Clean up potential markdown formatting from LLM response
+            clean_json = response.replace('```json', '').replace('```', '').strip()
+            return json.loads(clean_json)
+        except json.JSONDecodeError:
+            print(f"Error: Triage failed to return valid JSON. Response was: {response}", file=sys.stderr)
+            return {"action": "create_new_noun", "target": "unknown_noun"}
+
+    def architect_plan(self, triage_decision: dict) -> str:
+        print("--- [Evolve] Phase 2: Architect Planning ---")
+        target = triage_decision.get('target', 'unknown')
+        sys_prompt = "You are dcomp-architect. You MUST output a valid PDM JSONL block defining the structural changes."
+        prompt = f"Task: {self.prompt}\nTarget Domain/Noun: {target}\n\nGenerate the JSONL operations (e.g., scaffold_noun, scaffold_verb) required to implement this. Do not output anything other than the ```jsonl block."
+        
+        response = self.run_llm(prompt, sys_prompt)
+        return response
+
+    def implement(self, pdm_plan: str):
+        print("--- [Evolve] Phase 3 & 4: Scaffold and Implement ---")
+        
+        # Save the plan temporarily so PDMExecutor can parse it
+        plan_path = Path(".gemini/tmp_evolve_plan.md")
+        with open(plan_path, 'w') as f:
+            f.write(f"```jsonl\n{pdm_plan}\n```")
+            
+        from combinate import run_scaffold_verb, run_add_verb_verb, run_verify_verb, MockArgs, PipelineSurgeon
+        
+        def handle_scaffold_noun(d):
+            run_scaffold_verb(MockArgs(name=d.get('target')))
+            
+        def handle_scaffold_verb(d):
+            run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
+            
+        def handle_inject_code(d):
+            # Pass to coder skill
+            sys_prompt = "You are dcomp-coder. Write the implementation logic for this file based on the PDM instruction."
+            prompt = f"File: {d.get('file')}\nInstruction: {d.get('directive') or d.get('content')}"
+            code = self.run_llm(prompt, sys_prompt)
+            print(f"  [Surgery] AI Coder returned implementation for {d.get('file')}")
+            return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), code)
+            
+        def handle_verify(d, baseline):
+            run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
+            return True
+            
+        def get_current_state():
+            from dcomplib import load_and_merge_scans
+            return load_and_merge_scans(["cache.json"]).to_dict()
+
+        handlers = {
+            'scaffold_noun': handle_scaffold_noun,
+            'scaffold_verb': handle_scaffold_verb,
+            'inject_code': handle_inject_code,
+            'verify': handle_verify,
+            'get_current_state': get_current_state
+        }
+        
+        executor = PDMExecutor(handlers)
+        try:
+            success = executor.execute_plan(plan_path, MockArgs(no_verify=True)) # no_verify for now unless specified in plan
+            if success:
+                print("--- [Evolve] Evolution successful! ---")
+        except Exception as e:
+            print(f"--- [Evolve] Evolution failed. Rolling back. Error: {e} ---", file=sys.stderr)
+        finally:
+            if plan_path.exists():
+                plan_path.unlink()
+
+def execute_evolution(prompt: str):
+    evolver = OntologyEvolver(prompt)
+    triage = evolver.triage()
+    pdm_plan_raw = evolver.architect_plan(triage)
+    
+    # Extract just the JSONL content if formatted with markdown
+    import re
+    match = re.search(r'```jsonl\n(.*?)\n```', pdm_plan_raw, re.DOTALL)
+    pdm_plan = match.group(1) if match else pdm_plan_raw
+    
+    if not pdm_plan.strip():
+        print("Error: Architect failed to generate a plan.", file=sys.stderr)
+        return
+        
+    evolver.implement(pdm_plan)
