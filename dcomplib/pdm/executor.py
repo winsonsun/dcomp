@@ -48,15 +48,18 @@ class PDMExecutor:
                         
                     # Build summary
                     if op == 'scaffold_noun':
-                        summary['nouns'].append(d.get('target'))
+                        target = d.get('target') or d.get('name') or d.get('noun')
+                        if target: summary['nouns'].append(target)
                     elif op == 'scaffold_verb':
-                        noun = d.get('noun')
-                        verb = d.get('verb')
-                        summary['verbs'].append({"noun": noun, "verb": verb})
-                        if not summary['example_command']:
-                            summary['example_command'] = f"python3 dcomp_cli.py {noun} {verb} --help"
+                        noun = d.get('noun') or d.get('target')
+                        verb = d.get('verb') or d.get('name')
+                        if noun and verb:
+                            summary['verbs'].append({"noun": noun, "verb": verb})
+                            if not summary['example_command']:
+                                summary['example_command'] = f"python3 dcomp_cli.py {noun} {verb} --help"
                     elif op == 'inject_code':
-                        summary['files'].append(d.get('file'))
+                        file_path = d.get('file') or d.get('path')
+                        if file_path: summary['files'].append(file_path)
                 else:
                     print(f"Warning: Unhandled operation {op}")
 

@@ -121,24 +121,48 @@ class OntologyEvolver:
         from combinate import run_scaffold_verb, run_add_verb_verb, run_verify_verb, MockArgs, PipelineSurgeon
         
         def handle_scaffold_noun(d):
-            run_scaffold_verb(MockArgs(name=d.get('target')))
+            target = d.get('target') or d.get('name') or d.get('noun')
+            if not target:
+                target = input("Missing field 'target'. Enter target noun name (e.g. core.network): ").strip()
+                if not target: raise ValueError("Target noun name is required.")
+                d['target'] = target # Save it back to dict
+            run_scaffold_verb(MockArgs(name=target))
             
         def handle_scaffold_verb(d):
-            run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
+            noun = d.get('noun') or d.get('target')
+            verb = d.get('verb') or d.get('name')
+            if not noun:
+                noun = input("Missing field 'noun'. Enter target noun name (e.g. core.network): ").strip()
+                if not noun: raise ValueError("Noun name is required.")
+                d['noun'] = noun
+            if not verb:
+                verb = input("Missing field 'verb'. Enter verb name (e.g. ping): ").strip()
+                if not verb: raise ValueError("Verb name is required.")
+                d['verb'] = verb
+            run_add_verb_verb(MockArgs(noun=noun, verb_name=verb))
             
         def handle_inject_code(d):
+            file_path = d.get('file') or d.get('path')
+            if not file_path:
+                file_path = input("Missing field 'file'. Enter target file path: ").strip()
+                if not file_path: raise ValueError("File path is required.")
+                d['file'] = file_path
+                
+            anchor_text = d.get('anchor_text', '')
+            position = d.get('position', 'replace')
+            
             # Pass to coder skill
             sys_prompt = "You are dcomp-coder. Write the implementation logic for this file based on the PDM instruction. DO NOT return markdown blocks or any other text, ONLY return the exact raw python code to be injected."
-            prompt = f"File: {d.get('file')}\nInstruction: {d.get('directive') or d.get('content')}"
+            prompt = f"File: {file_path}\nInstruction: {d.get('directive') or d.get('content')}"
             code = self.run_llm(prompt, sys_prompt)
-            print(f"  [Surgery] AI Coder returned implementation for {d.get('file')}")
+            print(f"  [Surgery] AI Coder returned implementation for {file_path}")
             
             # Clean up potential markdown formatting from LLM response
             import re
             match = re.search(r'```(?:python)?\n?(.*?)\n?```', code, re.DOTALL)
             clean_code = match.group(1) if match else code
             
-            return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), clean_code)
+            return PipelineSurgeon.inject_code(Path(file_path), anchor_text, position, clean_code)
             
         def handle_verify(d, baseline):
             run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
