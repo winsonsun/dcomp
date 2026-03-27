@@ -11,7 +11,7 @@ class PDMExecutor:
         directives = BlueprintCompiler.parse(plan_path)
         if not directives:
             print("Error: No valid JSONL PDM directives found in plan.", file=sys.stderr)
-            return False
+            return False, None
             
         plan_name = plan_path.name
         
@@ -29,6 +29,13 @@ class PDMExecutor:
                         break
 
             # 2. Execution Loop
+            summary = {
+                "nouns": [],
+                "verbs": [],
+                "files": [],
+                "example_command": None
+            }
+            
             for d in directives:
                 op = d.get('op')
                 if op == 'snapshot' or op == 'verify': continue
@@ -38,6 +45,18 @@ class PDMExecutor:
                     success = self.handlers[op](d)
                     if success is False: # Check specifically for False
                         raise RuntimeError(f"Operation {op} failed.")
+                        
+                    # Build summary
+                    if op == 'scaffold_noun':
+                        summary['nouns'].append(d.get('target'))
+                    elif op == 'scaffold_verb':
+                        noun = d.get('noun')
+                        verb = d.get('verb')
+                        summary['verbs'].append({"noun": noun, "verb": verb})
+                        if not summary['example_command']:
+                            summary['example_command'] = f"python3 dcomp_cli.py {noun} {verb} --help"
+                    elif op == 'inject_code':
+                        summary['files'].append(d.get('file'))
                 else:
                     print(f"Warning: Unhandled operation {op}")
 
@@ -55,6 +74,6 @@ class PDMExecutor:
             # 4. Save History
             if 'get_current_state' in self.handlers:
                 current_state = self.handlers['get_current_state']()
-                HistoryManager.save_snapshot(plan_name, current_state, directives)
+                HistoryManager.save_snapshot(plan_name, current_state, directives, summary)
                 
-        return True
+        return True, summary

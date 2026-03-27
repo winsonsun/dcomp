@@ -261,6 +261,11 @@ def register_cli(subparsers):
     p_scaffold.add_argument("--force", action='store_true', help="Allow scaffolding into protected namespaces.")
     p_scaffold.set_defaults(func=run_scaffold_verb)
 
+    # Verb: history
+    p_history = domain_sub.add_parser("history", help="List recent evolution history and summaries.")
+    p_history.add_argument("--limit", type=int, default=5, help="Number of recent evolutions to show.")
+    p_history.set_defaults(func=run_history_verb)
+
     # Verb: add-verb
     p_add_verb = domain_sub.add_parser("add-verb", help="Add a new verb to an existing noun.")
     p_add_verb.add_argument("noun", help="Namespace and name of the target noun (e.g., domain.tags).")
@@ -479,6 +484,11 @@ def get_noun_file_path(full_name: str) -> tuple[Path, Path, Path]:
         
     folder = base / noun_name
     return folder / "noun.py", folder / "contract.json", folder
+
+def run_history_verb(args):
+    """Implementation of 'combinate domain history'."""
+    from dcomplib.pdm.history import HistoryManager
+    HistoryManager.list_history(limit=args.limit)
 
 def run_evolve_verb(args):
     """Implementation of 'combinate domain evolve'."""

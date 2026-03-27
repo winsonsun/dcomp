@@ -2,9 +2,29 @@ import os
 import sys
 import json
 import time
+import threading
 import subprocess
 from pathlib import Path
 from dcomplib.pdm.executor import PDMExecutor
+
+class Heartbeat(threading.Thread):
+    def __init__(self, message="Working..."):
+        super().__init__(daemon=True)
+        self.stop_event = threading.Event()
+        self.message = message
+
+    def run(self):
+        sys.stdout.write(self.message)
+        sys.stdout.flush()
+        while not self.stop_event.is_set():
+            sys.stdout.write(".")
+            sys.stdout.flush()
+            time.sleep(2)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    def stop(self):
+        self.stop_event.set()
 
 class OntologyEvolver:
     def __init__(self, prompt: str):
@@ -26,18 +46,44 @@ class OntologyEvolver:
         """Lightweight wrapper to call Gemini CLI or mock for tests."""
         print(f"--- [LLM Request] ---")
         start_time = time.time()
+        heartbeat = Heartbeat()
+        heartbeat.start()
         try:
             # We use gemini CLI since we are inside a gemini CLI workspace
             full_prompt = f"System Instruction: {system_prompt}\n\nUser Request: {prompt}" if system_prompt else prompt
-            cmd = ["gemini", "--prompt", full_prompt, "--approval-mode", "plan"]
+            cmd = ["gemini", "--prompt", full_prompt, "--approval-mode", "plan", "-o", "json"]
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            heartbeat.stop()
+            heartbeat.join()
+            
+            # The gemini CLI might output warnings to stdout before the JSON
+            stdout = result.stdout
+            if "{" in stdout:
+                stdout = stdout[stdout.index("{"):]
+            
+            data = json.loads(stdout)
+            response = data.get("response", "").strip()
+            
+            # Extract stats for token consumption
+            stats = data.get("stats", {})
+            models = stats.get("models", {})
+            in_tokens = 0
+            out_tokens = 0
+            for model_stats in models.values():
+                tokens = model_stats.get("tokens", {})
+                in_tokens += tokens.get("input", tokens.get("prompt", 0))
+                out_tokens += tokens.get("candidates", 0)
+                
             elapsed = time.time() - start_time
-            print(f"--- [LLM Request] Completed in {elapsed:.2f}s ---")
-            return result.stdout.strip()
-        except subprocess.CalledProcessError as e:
+            print(f"--- [LLM Request] Completed in {elapsed:.2f}s (Tokens: {in_tokens} in / {out_tokens} out) ---")
+            return response
+        except Exception as e:
+            heartbeat.stop()
+            heartbeat.join()
             elapsed = time.time() - start_time
-            print(f"Warning: LLM Call Failed after {elapsed:.2f}s. Are you authenticated with gemini-cli? Error: {e.stderr}", file=sys.stderr)
+            err_msg = str(e.stderr) if hasattr(e, 'stderr') else str(e)
+            print(f"Warning: LLM Call Failed after {elapsed:.2f}s. Error: {err_msg}", file=sys.stderr)
             return ""
 
     def triage(self) -> dict:
@@ -112,11 +158,11 @@ class OntologyEvolver:
         
         executor = PDMExecutor(handlers)
         try:
-            success = executor.execute_plan(plan_path, MockArgs(no_verify=True)) # no_verify for now unless specified in plan
-            return success
+            success, summary = executor.execute_plan(plan_path, MockArgs(no_verify=True)) # no_verify for now unless specified in plan
+            return success, summary
         except Exception as e:
             print(f"--- [Evolve] Evolution failed. Rolling back. Error: {e} ---", file=sys.stderr)
-            return False
+            return False, None
         finally:
             if plan_path.exists():
                 plan_path.unlink()
@@ -136,28 +182,23 @@ def execute_evolution(prompt: str):
         print(f"Raw Output from Architect:\n{pdm_plan_raw}", file=sys.stderr)
         return
         
-    success = evolver.implement(pdm_plan)
+    success, summary = evolver.implement(pdm_plan)
     
-    if success:
-        print("\n--- [Evolve] Evolution successful! ---")
-        print("\nNew capabilities added:")
-        example_command = None
-        for line in pdm_plan.strip().split('\n'):
-            line = line.strip()
-            if not line: continue
-            try:
-                d = json.loads(line)
-                op = d.get('op')
-                if op == 'scaffold_noun':
-                    print(f"  - Scaffolded Domain: {d.get('target')}")
-                elif op == 'scaffold_verb':
-                    noun = d.get('noun')
-                    verb = d.get('verb')
-                    print(f"  - Added Verb: {verb} (to {noun})")
-                    if not example_command:
-                        example_command = f"python3 dcomp_cli.py {noun} {verb} --help"
-            except json.JSONDecodeError:
-                pass
+    if success and summary:
+        print("\n" + "="*40)
+        print("--- [Evolve] Evolution successful! ---")
+        print("="*40)
+        print("\nArchitectural Changes Summary:")
+        
+        if summary.get("nouns"):
+            for n in summary["nouns"]: print(f"  [Noun] Created Domain: {n}")
+        if summary.get("verbs"):
+            for v in summary["verbs"]: print(f"  [Verb] Added Action: {v['verb']} (to {v['noun']})")
+        if summary.get("files"):
+            for f in summary["files"]: print(f"  [Code] Modified File: {f}")
                 
-        if example_command:
-            print(f"\nTry running your new command:\n  {example_command}\n")
+        cmd = summary.get("example_command")
+        if cmd:
+            print("\nTry out your new capability:")
+            print(f"  {cmd}")
+        print("="*40)

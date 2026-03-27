@@ -1,3 +1,5 @@
 ```jsonl
-{"operation": "modify_noun", "domain": "media", "noun": "processor", "instruction": "Update all verbs to accept --src-path and --target-path. If target-path is missing, default to src-path. If both are missing, default to the current working directory."}
+{"op": "scaffold_noun", "domain": "media", "noun": "youtube_metadata"}
+{"op": "scaffold_verb", "domain": "media", "verb": "resolve_youtube_match"}
+{"op": "scaffold_verb", "domain": "media", "verb": "write_author_index"}
 ```
