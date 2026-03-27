@@ -922,14 +922,14 @@ def run_execute_verb(args):
         run_snapshot_verb(MockArgs(output=baseline, scan_files=["cache.json"]))
         
     def handle_scaffold_noun(d):
-        run_scaffold_verb(MockArgs(name=d.get('target')))
+        run_scaffold_verb(MockArgs(name=d.target))
         
     def handle_scaffold_verb(d):
-        run_add_verb_verb(MockArgs(noun=d.get('noun'), verb_name=d.get('verb')))
+        run_add_verb_verb(MockArgs(noun=d.noun, verb_name=d.verb))
         
     def handle_inject_code(d):
-        print(f"  [Surgery] Injecting code into {d.get('file')} at anchor '{d.get('anchor_text')[:30]}...'")
-        return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), d.get('content'))
+        print(f"  [Surgery] Injecting code into {d.file_path} at anchor '{d.anchor_text[:30]}...'")
+        return PipelineSurgeon.inject_code(Path(d.file_path), d.anchor_text, d.position, d.directive_text)
         
     def handle_verify(d, baseline):
         # We need to run tests as well to verify code state (as requested in the refactor)

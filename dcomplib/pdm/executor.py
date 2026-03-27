@@ -20,8 +20,8 @@ class PDMExecutor:
             baseline = None
             if not getattr(args, 'no_verify', False):
                 for d in directives:
-                    if d.get('op') == 'snapshot':
-                        baseline = f"plans/{d.get('label', 'baseline_snapshot')}.json"
+                    if d.op == 'snapshot':
+                        baseline = f"plans/{getattr(d, 'label', 'baseline_snapshot')}.json"
                         Path("plans").mkdir(exist_ok=True)
                         print(f"Taking behavioral snapshot to {baseline}...")
                         if 'snapshot' in self.handlers:
@@ -37,7 +37,7 @@ class PDMExecutor:
             }
             
             for d in directives:
-                op = d.get('op')
+                op = d.op
                 if op == 'snapshot' or op == 'verify': continue
                 
                 print(f"Processing operation: {op}...")
@@ -48,26 +48,21 @@ class PDMExecutor:
                         
                     # Build summary
                     if op == 'scaffold_noun':
-                        target = d.get('target') or d.get('name') or d.get('noun')
-                        if target: summary['nouns'].append(target)
+                        summary['nouns'].append(d.target)
                     elif op == 'scaffold_verb':
-                        noun = d.get('noun') or d.get('target')
-                        verb = d.get('verb') or d.get('name')
-                        if noun and verb:
-                            summary['verbs'].append({"noun": noun, "verb": verb})
-                            if not summary['example_command']:
-                                summary['example_command'] = f"python3 dcomp_cli.py {noun} {verb} --help"
+                        summary['verbs'].append({"noun": d.noun, "verb": d.verb})
+                        if not summary['example_command']:
+                            summary['example_command'] = f"python3 dcomp_cli.py {d.noun} {d.verb} --help"
                     elif op == 'inject_code':
-                        file_path = d.get('file') or d.get('path')
-                        if file_path: summary['files'].append(file_path)
+                        summary['files'].append(d.file_path)
                 else:
                     print(f"Warning: Unhandled operation {op}")
 
             # 3. Automated Verification
             if baseline:
                 for d in directives:
-                    if d.get('op') == 'verify':
-                        print(f"\n--- Verifying Rewired Behavior (against {d.get('against')}) ---")
+                    if d.op == 'verify':
+                        print(f"\n--- Verifying Rewired Behavior (against {d.against}) ---")
                         if 'verify' in self.handlers:
                             success = self.handlers['verify'](d, baseline)
                             if success is False:
@@ -77,6 +72,7 @@ class PDMExecutor:
             # 4. Save History
             if 'get_current_state' in self.handlers:
                 current_state = self.handlers['get_current_state']()
-                HistoryManager.save_snapshot(plan_name, current_state, directives, summary)
+                raw_directives = [d.original_data for d in directives]
+                HistoryManager.save_snapshot(plan_name, current_state, raw_directives, summary)
                 
         return True, summary
