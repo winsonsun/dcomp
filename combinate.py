@@ -181,6 +181,70 @@ class FPAnalyzer(ast.NodeVisitor):
         report += f"Suitability for Approach A (Policy Injection): [{suitability}]\n"
         
         if suitability != "HIGH":
+            report += "Recommend Approach B (Combinator Rewrite) or resolving issues first.\n"
+        return report, score
+
+class RecursionAnalyzer(ast.NodeVisitor):
+    """Analyzes injected code to ensure recursive LLM calls are safe."""
+    def __init__(self):
+        self.is_safe = True
+        self.unsafe_reason = ""
+        self.found_llm_call = False
+
+    def visit_Call(self, node):
+        # Look for subprocess.run or similar calls
+        is_subprocess = False
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            if node.func.value.id == 'subprocess' and node.func.attr in ('run', 'Popen'):
+                is_subprocess = True
+        
+        # Look for direct gemini CLI or SDK calls
+        is_gemini_sdk = False
+        if isinstance(node.func, ast.Name) and 'gemini' in node.func.id.lower():
+            is_gemini_sdk = True
+            
+        if is_subprocess or is_gemini_sdk:
+            # Extract arguments as best effort strings
+            args_text = ""
+            for arg in node.args:
+                if isinstance(arg, ast.List):
+                    for elt in arg.elts:
+                        if isinstance(elt, ast.Constant):
+                            args_text += str(elt.value) + " "
+                elif isinstance(arg, ast.Constant):
+                    args_text += str(arg.value) + " "
+                    
+            args_text = args_text.lower()
+            
+            if "gemini" in args_text or is_gemini_sdk:
+                self.found_llm_call = True
+                
+                # Rule 1: Manifest-Driven
+                if "--approval-mode plan" in args_text or "-o json" in args_text:
+                    # Safe.
+                    pass
+                else:
+                    # Rule 2: Separable Domain check
+                    meta_keywords = ['python', 'code', 'bash', 'script', 'file', 'write', 'execute']
+                    data_keywords = ['analyze', 'categorize', 'summarize', 'transcript', 'music', 'text', 'json']
+                    
+                    has_meta = any(k in args_text for k in meta_keywords)
+                    has_data = any(k in args_text for k in data_keywords)
+                    
+                    if has_meta:
+                        self.is_safe = False
+                        self.unsafe_reason = f"Detected meta-programming keywords in LLM call: {args_text}"
+                    elif not has_data:
+                        # Unrecognized domain, block by default
+                        self.is_safe = False
+                        self.unsafe_reason = f"Detected open-ended LLM call without clear separable domain constraints: {args_text}"
+
+        self.generic_visit(node)
+            report += "\n"
+
+        report += f"Suitability for Approach A (Policy Injection): [{suitability}]\n"
+        
+        if suitability != "HIGH":
             report += f"\nRecommendation: LOW suitability for direct policy injection. Refactor into Combinators first.\n"
             if issues:
                 report += "\n".join(issues) + "\n"
@@ -194,11 +258,29 @@ class PipelineSurgeon:
         if not file_path.exists():
             print(f"Error: Target file '{file_path}' not found.", file=sys.stderr)
             return False
-            
-        with open(file_path, 'r') as f: content_str = f.read()
-        
-        import ast
+
+        # Security check: Analyze injected code for unsafe recursion
         try:
+            tree = ast.parse(content)
+            analyzer = RecursionAnalyzer()
+            analyzer.visit(tree)
+            if analyzer.found_llm_call:
+                print(f"  [Security] Detected LLM invocation in generated code.")
+                if analyzer.is_safe:
+                    print(f"  [Security] Call approved (Separable Domain / Manifest-Driven).")
+                else:
+                    print(f"\n[SECURITY WARNING] The generated code attempts an unsafe or open-ended LLM call.")
+                    print(f"Reason: {analyzer.unsafe_reason}")
+                    print("This operation has been blocked by the Recursion Analyzer to prevent dangerous Agent-in-Agent loops.")
+                    return False
+        except SyntaxError:
+            print("  [Surgeon] Warning: Generated code has invalid syntax. AST recursion check skipped, but execution will likely fail later.")
+        except Exception as e:
+            print(f"  [Surgeon] Warning: Failed to parse AST for recursion check: {e}")
+
+        with open(file_path, 'r') as f: content_str = f.read()
+
+        import ast        try:
             tree = ast.parse(content_str)
             insert_lineno = -1
             for node in ast.walk(tree):
