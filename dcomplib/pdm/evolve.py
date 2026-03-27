@@ -29,7 +29,7 @@ class OntologyEvolver:
         try:
             # We use gemini CLI since we are inside a gemini CLI workspace
             full_prompt = f"System Instruction: {system_prompt}\n\nUser Request: {prompt}" if system_prompt else prompt
-            cmd = ["gemini", "ask", full_prompt]
+            cmd = ["gemini", "--prompt", full_prompt, "--approval-mode", "plan"]
             
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             elapsed = time.time() - start_time
@@ -82,11 +82,17 @@ class OntologyEvolver:
             
         def handle_inject_code(d):
             # Pass to coder skill
-            sys_prompt = "You are dcomp-coder. Write the implementation logic for this file based on the PDM instruction."
+            sys_prompt = "You are dcomp-coder. Write the implementation logic for this file based on the PDM instruction. DO NOT return markdown blocks or any other text, ONLY return the exact raw python code to be injected."
             prompt = f"File: {d.get('file')}\nInstruction: {d.get('directive') or d.get('content')}"
             code = self.run_llm(prompt, sys_prompt)
             print(f"  [Surgery] AI Coder returned implementation for {d.get('file')}")
-            return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), code)
+            
+            # Clean up potential markdown formatting from LLM response
+            import re
+            match = re.search(r'```(?:python)?\n?(.*?)\n?```', code, re.DOTALL)
+            clean_code = match.group(1) if match else code
+            
+            return PipelineSurgeon.inject_code(Path(d.get('file')), d.get('anchor_text'), d.get('position'), clean_code)
             
         def handle_verify(d, baseline):
             run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
@@ -122,11 +128,12 @@ def execute_evolution(prompt: str):
     
     # Extract just the JSONL content if formatted with markdown
     import re
-    match = re.search(r'```jsonl\n(.*?)\n```', pdm_plan_raw, re.DOTALL)
+    match = re.search(r'```(?:jsonl|json)?\n?(.*?)\n?```', pdm_plan_raw, re.DOTALL)
     pdm_plan = match.group(1) if match else pdm_plan_raw
     
     if not pdm_plan.strip():
         print("Error: Architect failed to generate a plan.", file=sys.stderr)
+        print(f"Raw Output from Architect:\n{pdm_plan_raw}", file=sys.stderr)
         return
         
     success = evolver.implement(pdm_plan)
