@@ -47,6 +47,27 @@ Integrate the injector into the main agent loop (or the tool-call sequence) to e
 *   **Increased Reliability:** Prevents the "Coder" from being distracted by orchestration rules and vice versa.
 *   **Deterministic Handoffs:** Formalizes the Architect -> Coder transition through a physical file trigger.
 
+---
+
+## FUTURE ARCHITECTURE: Functional PDM State Transformation (FilePatch Model)
+
+### Background
+Currently, the PDM execution engine (`meta/combinate.py` and `meta/pdm/evolve.py`) operates imperatively. During `execute_plan`, handlers like `PipelineSurgeon.inject_code` directly mutate files on disk. If a multi-step plan fails mid-execution, the system relies on a coarse `git reset --hard` (via `WorkspaceTransaction`) to rollback the dirty state.
+
+While effective, this violates the pure, data-centric, RxJS-like philosophy of the target domain.
+
+### Proposed Evolution (Delayed for Simplicity)
+To make the meta-layer truly functional, it should transition to a "Virtual Patch" architecture.
+
+1.  **FilePatch DataClass:** Create a pure data object representing a pending change (e.g., `FilePatch(path, new_content, description)`).
+2.  **Lazy Evaluation:** Handlers (`handle_scaffold_verb`, `handle_inject_code`) no longer call `open().write()`. Instead, they return a `List[FilePatch]`.
+3.  **The Result Stream:** The `PDMExecutor` maps the `Stream[PDMDirective]` into a `Stream[Result[List[FilePatch], Error]]`.
+4.  **Atomic Sink:** Only if the entire stream resolves to `Success` does a final `CommitToDiskSink` iterate through the patches and apply them to the filesystem.
+
+### Rationale for Delay
+This refactor is currently **On-Hold**. 
+The immediate priority is maintaining the simplicity and debuggability of `combinate.py`. The imperative `WorkspaceTransaction` (Git rollback) provides sufficient safety for the current frequency of blueprint changes. The `FilePatch` model introduces memory overhead and complexity that should only be implemented when blueprint modifications become highly frequent, parallelized, or require pre-flight dry-run diffs without touching the `.git` tree.
+
 ## Next Steps
 *   This plan is currently **On-Hold** until the `prompt_src` context weight exceeds the efficiency threshold.
 *   Implementation will require a "Runtime" script that can be called by the LLM or the orchestration tool to refresh the environment.

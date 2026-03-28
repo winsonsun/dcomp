@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 import sys
-from dcomplib.pdm.contracts import parse_directive, PDMDirective
+from meta.pdm.contracts import parse_directive, PDMDirective
 from typing import List
 
 class BlueprintCompiler:

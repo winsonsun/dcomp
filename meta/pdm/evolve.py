@@ -5,7 +5,8 @@ import time
 import threading
 import subprocess
 from pathlib import Path
-from dcomplib.pdm.executor import PDMExecutor
+from meta.pdm.executor import PDMExecutor
+from meta.pdm.mcts import MCTSEngine
 
 class Heartbeat(threading.Thread):
     def __init__(self, message="Working..."):
@@ -89,8 +90,8 @@ class OntologyEvolver:
     def triage(self) -> dict:
         print("--- [Evolve] Phase 1: Triage Router ---")
         nouns = self.get_existing_nouns()
-        sys_prompt = "You are a routing agent. Decide if this prompt requires a new noun or modifying an existing noun."
-        prompt = f"Prompt: {self.prompt}\nExisting Nouns: {nouns}\n\nOutput ONLY a raw JSON object with no markdown formatting: {{\"action\": \"create_new_noun\", \"target\": \"noun_name\"}} or {{\"action\": \"modify_existing_noun\", \"target\": \"existing_noun_name\"}}"
+        sys_prompt = "You are a senior routing agent. Classify the user's request into 'simple' (one verb/noun modification) or 'complex' (multi-step workflow or system change)."
+        prompt = f"Prompt: {self.prompt}\nExisting Nouns: {nouns}\n\nOutput ONLY a raw JSON object: {{\"action\": \"create_new_noun|modify_existing_noun\", \"target\": \"noun_name\", \"complexity\": \"simple|complex\"}}"
         
         response = self.run_llm(prompt, sys_prompt)
         try:
@@ -99,10 +100,30 @@ class OntologyEvolver:
             return json.loads(clean_json)
         except json.JSONDecodeError:
             print(f"Error: Triage failed to return valid JSON. Response was: {response}", file=sys.stderr)
-            return {"action": "create_new_noun", "target": "unknown_noun"}
+            return {"action": "create_new_noun", "target": "unknown_noun", "complexity": "simple"}
+
+    def architect_plan_mcts(self) -> str:
+        print("--- [Evolve] Phase 2: MCTS Architectural Search ---")
+        
+        # 1. Load the computable ontology graph
+        ontology = []
+        path = Path(".gemini/pdm_arch_ontology.jsonl")
+        if path.exists():
+            with open(path, 'r') as f:
+                for line in f:
+                    if line.strip(): ontology.append(json.loads(line))
+        
+        # 2. Run MCTS
+        engine = MCTSEngine(self, ontology, self.prompt)
+        # We start with a small number of iterations for now
+        pdm_plan = engine.run(iterations=3)
+        return f"```jsonl\n{pdm_plan}\n```"
 
     def architect_plan(self, triage_decision: dict) -> str:
-        print("--- [Evolve] Phase 2: Architect Planning ---")
+        if triage_decision.get("complexity") == "complex":
+            return self.architect_plan_mcts()
+            
+        print("--- [Evolve] Phase 2: Architect Planning (Linear) ---")
         target = triage_decision.get('target', 'unknown')
         sys_prompt = "You are dcomp-architect. You MUST output a valid PDM JSONL block defining the structural changes."
         prompt = f"Task: {self.prompt}\nTarget Domain/Noun: {target}\n\nGenerate the JSONL operations (e.g., scaffold_noun, scaffold_verb) required to implement this. Do not output anything other than the ```jsonl block."
@@ -118,7 +139,7 @@ class OntologyEvolver:
         with open(plan_path, 'w') as f:
             f.write(f"```jsonl\n{pdm_plan}\n```")
             
-        from combinate import run_scaffold_verb, run_add_verb_verb, run_verify_verb, MockArgs, PipelineSurgeon
+        from meta.combinate import run_scaffold_verb, run_add_verb_verb, run_verify_verb, MockArgs, PipelineSurgeon
         
         def handle_scaffold_noun(d):
             target = getattr(d, 'target', None)
@@ -165,6 +186,99 @@ class OntologyEvolver:
             
             return PipelineSurgeon.inject_code(Path(file_path), anchor_text, position, clean_code)
             
+        def handle_wire_pipeline(d):
+            from meta.combinate import get_noun_file_path
+            
+            # 1. Resolve target file
+            full_name = getattr(d, 'noun', None)
+            verb = getattr(d, 'verb', None)
+            instruction = getattr(d, 'instruction', '')
+            
+            if not full_name or not verb:
+                raise ValueError("wire_pipeline requires 'noun' and 'verb' fields.")
+                
+            file_path, _, _ = get_noun_file_path(full_name)
+            if not file_path.exists():
+                raise RuntimeError(f"Cannot wire pipeline: noun '{full_name}' not found at {file_path}")
+                
+            # 2. Invoke Coder LLM
+            sys_prompt = "You are dcomp-coder. Write the native Python implementation for this specific verb pipeline. Use the system's pure functional Combinators (e.g. Map, Filter, Pipeline, Join). ONLY return the exact raw Python code to be injected. Do NOT output markdown, ONLY raw python code."
+            prompt = f"Target File: {file_path}\nTarget Noun: {full_name}\nTarget Verb: {verb}\nInstruction: {instruction}\n\nProvide ONLY the python code for the body of `def run_{verb.replace('-', '_')}_verb(args):` or any necessary helper functions to be injected at the end of the file."
+            
+            code = self.run_llm(prompt, sys_prompt)
+            print(f"  [Surgery] AI Coder returned pipeline implementation for {full_name}.{verb}")
+            
+            # Clean up potential markdown formatting
+            import re
+            match = re.search(r'```(?:python)?\n?(.*?)\n?```', code, re.DOTALL)
+            clean_code = match.group(1) if match else code
+            
+            # 3. Inject
+            # For simplicity, we assume we want to inject this inside the `run_verb_verb` function
+            anchor_text = f"def run_{verb.replace('-', '_')}_verb(args):"
+            
+            # Often the Coder might return the full function signature. If so, replace the entire anchor.
+            if anchor_text in clean_code:
+                # If the returned code includes the function definition, we replace the existing 'pass' body.
+                # It's safer to just inject 'replace' on the anchor, but PipelineSurgeon replace replaces the specific string.
+                # Actually, we should replace 'pass' or just inject 'after'.
+                # Let's replace the whole function definition and body if they provide the signature, else inject after signature.
+                pass
+            else:
+                # If they just provided the body, indent it and place it after.
+                pass
+                
+            # It's better to just pass it to PipelineSurgeon. Let's use position 'replace' if it includes the def, else 'after'.
+            # A more robust way is to just inject 'replace' if the anchor exists. Wait, if we use position="replace", PipelineSurgeon replaces the anchor text with the new text.
+            # But the existing `run_verb_verb` might have more than just `pass`.
+            # Let's just ask the LLM to provide the FULL function `def run_verb_verb(args): ...` and replace the original definition.
+            
+            # Let's rewrite the prompt slightly:
+            # Inject DSL Constraints
+            dsl_context = ""
+            dsl_path = Path("doc/PRD_COMBINATORS.md")
+            if dsl_path.exists():
+                with open(dsl_path, 'r') as f:
+                    dsl_context = f.read()
+
+            sys_prompt = f"You are dcomp-coder. Write the native Python implementation for this pipeline. You MUST ONLY use the Combinators listed below. Do not invent new combinators. Do not write procedural loops. Construct the logic by composing these specific blocks.\n\n=== COMBINATOR DSL ===\n{dsl_context}\n======================\n\nYou MUST include the full function signature `def run_{verb.replace('-', '_')}_verb(args):` in your output. Return ONLY the raw Python code, no markdown blocks."
+            prompt = f"Target Noun: {full_name}\nTarget Verb: {verb}\nInstruction: {instruction}\n\nReplace the existing placeholder verb function with the implemented pipeline."
+            
+            code = self.run_llm(prompt, sys_prompt)
+            print(f"  [Surgery] AI Coder returned pipeline implementation for {full_name}.{verb}")
+            
+            match = re.search(r'```(?:python)?\n?(.*?)\n?```', code, re.DOTALL)
+            clean_code = match.group(1) if match else code
+            
+            # Get the exact function name to replace
+            func_name = f"run_{verb.replace('-', '_')}_verb"
+            anchor_text = f"def {func_name}"
+            
+            # Let's read the file to find where the function starts and replace it
+            with open(file_path, 'r') as f:
+                content_str = f.read()
+            
+            import ast
+            try:
+                tree = ast.parse(content_str)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                        # Re-read lines
+                        lines = content_str.split('\n')
+                        start_line = node.lineno - 1
+                        end_line = node.end_lineno
+                        
+                        # Replace those lines with the new code
+                        new_lines = lines[:start_line] + clean_code.split('\n') + lines[end_line:]
+                        with open(file_path, 'w') as f:
+                            f.write('\n'.join(new_lines))
+                        return True
+            except Exception as e:
+                print(f"Failed to surgically replace function AST for wire_pipeline: {e}")
+                
+            # Fallback
+            return PipelineSurgeon.inject_code(Path(file_path), anchor_text, 'replace', clean_code)
+
         def handle_verify(d, baseline):
             run_verify_verb(MockArgs(snapshot=baseline, save=None, scan_files=["cache.json"]))
             return True
@@ -177,6 +291,7 @@ class OntologyEvolver:
             'scaffold_noun': handle_scaffold_noun,
             'scaffold_verb': handle_scaffold_verb,
             'inject_code': handle_inject_code,
+            'wire_pipeline': handle_wire_pipeline,
             'verify': handle_verify,
             'get_current_state': get_current_state
         }
@@ -219,6 +334,8 @@ def execute_evolution(prompt: str):
             for n in summary["nouns"]: print(f"  [Noun] Created Domain: {n}")
         if summary.get("verbs"):
             for v in summary["verbs"]: print(f"  [Verb] Added Action: {v['verb']} (to {v['noun']})")
+        if summary.get("wired_pipelines"):
+            for w in summary["wired_pipelines"]: print(f"  [Pipeline] Wired Logic: {w['verb']} (in {w['noun']})")
         if summary.get("files"):
             for f in summary["files"]: print(f"  [Code] Modified File: {f}")
                 

@@ -60,6 +60,28 @@ class InjectCodeDirective(PDMDirective):
         )
 
 @dataclass
+class WirePipelineDirective(PDMDirective):
+    noun: str
+    verb: str
+    instruction: str
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'WirePipelineDirective':
+        noun = d.get('noun') or d.get('target')
+        verb = d.get('verb') or d.get('name')
+        if not noun:
+            raise ValueError("Missing required field for wire_pipeline: 'noun' or 'target'")
+        if not verb:
+            raise ValueError("Missing required field for wire_pipeline: 'verb' or 'name'")
+        return cls(
+            op='wire_pipeline', 
+            original_data=d, 
+            noun=noun, 
+            verb=verb, 
+            instruction=d.get('instruction', '')
+        )
+
+@dataclass
 class VerifyDirective(PDMDirective):
     against: str
 
@@ -87,6 +109,8 @@ def parse_directive(d: Dict[str, Any]) -> PDMDirective:
         return ScaffoldVerbDirective.from_dict(d)
     elif op == 'inject_code':
         return InjectCodeDirective.from_dict(d)
+    elif op == 'wire_pipeline':
+        return WirePipelineDirective.from_dict(d)
     elif op == 'verify':
         return VerifyDirective.from_dict(d)
     elif op == 'snapshot':

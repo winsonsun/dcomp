@@ -56,7 +56,7 @@ def main():
         
         # 1. Handle inheritance (Foundational Layer)
         if "foundational" in skill_data.get("inherits", []):
-            # Maintain specific order: Glossary -> Protocols
+            # Maintain specific order_by: Glossary -> Protocols
             for sect in ["glossary", "protocols"]:
                 for snippet in foundational.get(sect, []):
                     skill_snippets.append(base / snippet)

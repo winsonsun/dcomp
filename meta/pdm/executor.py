@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-from dcomplib.pdm.compiler import BlueprintCompiler
-from dcomplib.pdm.history import WorkspaceTransaction, HistoryManager
+from meta.pdm.compiler import BlueprintCompiler
+from meta.pdm.history import WorkspaceTransaction, HistoryManager
 
 class PDMExecutor:
     def __init__(self, handlers):
@@ -33,6 +33,7 @@ class PDMExecutor:
                 "nouns": [],
                 "verbs": [],
                 "files": [],
+                "wired_pipelines": [],
                 "example_command": None
             }
             
@@ -55,6 +56,8 @@ class PDMExecutor:
                             summary['example_command'] = f"python3 dcomp_cli.py {d.noun} {d.verb} --help"
                     elif op == 'inject_code':
                         summary['files'].append(d.file_path)
+                    elif op == 'wire_pipeline':
+                        summary['wired_pipelines'].append({"noun": d.noun, "verb": d.verb})
                 else:
                     print(f"Warning: Unhandled operation {op}")
 

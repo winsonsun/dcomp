@@ -49,7 +49,7 @@ System nouns like `fs` (filesystem), `paths` (tokenization), and `database` woul
 
 ### Cons
 * **Complexity & Boilerplate**: You must introduce a robust dependency injection framework and priority sorting mechanism (e.g., "Tokenization MUST happen after Filtering but before Tree Building"). 
-* **Fragility**: It becomes much easier to break the core system by accidentally misconfiguring the load order of internal plugins.
+* **Fragility**: It becomes much easier to break the core system by accidentally misconfiguring the load order_by of internal plugins.
 * **Overhead**: The system spends significant startup time compiling, sorting, and validating the pipeline.
 
 ### Implementation Guide
